@@ -172,6 +172,9 @@ class HuggingFaceModel(ComposerModel):
         if "COMPOSER_FAIL_ON_VOCAB_MISMATCH" in os.environ:
             fail_on_vocab_mismatch = bool(os.environ["COMPOSER_FAIL_ON_VOCAB_MISMATCH"])
         
+        if "ALLOW_EMBEDDING_RESIZING" in os.environ:
+            allow_embedding_resizing = bool(os.environ["ALLOW_EMBEDDING_RESIZING"])
+        
         self._check_tokenizer_and_maybe_resize_embeddings(
             allow_embedding_resizing, fail_on_vocab_mismatch 
         )
@@ -197,7 +200,7 @@ class HuggingFaceModel(ComposerModel):
             )
 
         if self.tokenizer is not None and self.config.vocab_size < len(self.tokenizer):
-            if not fail_on_vocab_mismatch and allow_embedding_resizing:
+            if allow_embedding_resizing:
                 # when the embedding size is smaller than the tokenizer vocab size,
                 # the embeddings should get resized to match the tokenizer vocab size
                 log.warning(
