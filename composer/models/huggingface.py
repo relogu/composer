@@ -169,8 +169,11 @@ class HuggingFaceModel(ComposerModel):
         is_causal_lm = _is_registered_causal_lm(self.model)
         self.shift_labels = is_causal_lm if shift_labels is None else shift_labels
 
+        if "COMPOSER_FAIL_ON_VOCAB_MISMATCH" in os.environ:
+            fail_on_vocab_mismatch = bool(os.environ["COMPOSER_FAIL_ON_VOCAB_MISMATCH"])
+        
         self._check_tokenizer_and_maybe_resize_embeddings(
-            allow_embedding_resizing, fail_on_vocab_mismatch
+            allow_embedding_resizing, fail_on_vocab_mismatch 
         )
 
         if is_causal_lm and not self.shift_labels:
@@ -194,7 +197,7 @@ class HuggingFaceModel(ComposerModel):
             )
 
         if self.tokenizer is not None and self.config.vocab_size < len(self.tokenizer):
-            if fail_on_vocab_mismatch and allow_embedding_resizing:
+            if not fail_on_vocab_mismatch and allow_embedding_resizing:
                 # when the embedding size is smaller than the tokenizer vocab size,
                 # the embeddings should get resized to match the tokenizer vocab size
                 log.warning(
