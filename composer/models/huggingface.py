@@ -170,11 +170,11 @@ class HuggingFaceModel(ComposerModel):
         self.shift_labels = is_causal_lm if shift_labels is None else shift_labels
 
         if "COMPOSER_FAIL_ON_VOCAB_MISMATCH" in os.environ:
-            fail_on_vocab_mismatch = bool(os.environ["COMPOSER_FAIL_ON_VOCAB_MISMATCH"])
+            fail_on_vocab_mismatch = os.environ["COMPOSER_FAIL_ON_VOCAB_MISMATCH"].lower() in ["1", "true"]
         
         if "ALLOW_EMBEDDING_RESIZING" in os.environ:
-            allow_embedding_resizing = bool(os.environ["ALLOW_EMBEDDING_RESIZING"])
-        
+            allow_embedding_resizing = os.environ["ALLOW_EMBEDDING_RESIZING"].lower() in ["1", "true"]
+            
         self._check_tokenizer_and_maybe_resize_embeddings(
             allow_embedding_resizing, fail_on_vocab_mismatch 
         )
