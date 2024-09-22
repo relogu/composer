@@ -30,6 +30,7 @@ from composer.optim.scheduler import (
     PolynomialWithWarmupScheduler,
     StepScheduler,
     compile_composer_scheduler,
+    compile_composer_independent_schedulers,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     'PolynomialWithWarmupScheduler',
     'StepScheduler',
     'compile_composer_scheduler',
+    'compile_composer_independent_schedulers',
 ]
