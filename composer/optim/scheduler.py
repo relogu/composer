@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 __all__ = [
     'ComposerScheduler',
     'compile_composer_scheduler',
+    'compile_composer_independent_schedulers',
     'StepScheduler',
     'MultiStepScheduler',
     'ConstantScheduler',
@@ -204,6 +205,59 @@ def compile_composer_scheduler(scheduler: ComposerScheduler, state: State, ssr: 
     lambda_scheduler = LambdaLR(optimizer, scheduler_fn)
 
     return lambda_scheduler
+
+def compile_composer_independent_schedulers(schedulers: List[ComposerScheduler], state: State, ssr: float = 1.0) -> LRScheduler:
+    """Converts a stateless scheduler into a PyTorch scheduler object.
+
+    While the resulting scheduler provides a ``.step()`` interface similar to other PyTorch schedulers, the scheduler is
+    also given a bound reference to the current :class:`~composer.core.State`. This means that any internal state updated
+    by ``.step()`` can be ignored, and the scheduler can instead simply use the bound state to recalculate the current
+    learning rate.
+
+    Args:
+        scheduler (ComposerScheduler): A stateless scheduler, provided as a :class:`~.ComposerScheduler` object.
+        state (State): The Composer Trainer's state.
+
+    Returns:
+        compiled_scheduler (LRScheduler): The scheduler, in a form compatible with PyTorch scheduler interfaces.
+    """
+    # optimizers = weakref.proxy(state.optimizers)
+
+    optimizers = state.optimizers
+    if len(optimizers) != 1:
+        raise NotImplementedError('Providing functional schedulers is unsupported with multiple optimizers.')
+    optimizer = weakref.proxy(optimizers[0])
+    # optimizer = optimizers[0]
+    
+    def get_scheduler_fn(scheduler: ComposerScheduler):
+        nonlocal state
+        scheduler_sig = inspect.signature(scheduler)
+
+        def scheduler_fn(epoch: int) -> float:
+            nonlocal state
+            del epoch  # unused. Provided by the pytorch LambdaLR
+
+            # if the ssr is 1.0, don't pass it to the scheduler. This allows users to pass in lambdas that only take
+            # one parameter -- the state
+            if len(scheduler_sig.parameters) == 1:
+                if ssr == 1.0:
+                    return scheduler(state)
+                else:
+                    raise ValueError(
+                        textwrap.dedent(
+                            f"""\
+                        Scheduler {scheduler} does not support `scale_schedule_ratio`.
+                        To use `scale_schedule_ratio`, the scheduler must take two arguments (state, ssr)""",
+                        ),
+                    )
+            return scheduler(state, ssr)
+        
+        return scheduler_fn
+
+    lambda_scheduler = LambdaLR(optimizer, [get_scheduler_fn(scheduler) for scheduler in schedulers])
+
+    return lambda_scheduler
+
 
 
 class StepScheduler(ComposerScheduler):

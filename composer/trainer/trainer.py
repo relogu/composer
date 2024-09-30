@@ -94,7 +94,7 @@ from composer.loggers import (
 )
 from composer.loggers.mosaicml_logger import MOSAICML_ACCESS_TOKEN_ENV_VAR, MOSAICML_PLATFORM_ENV_VAR
 from composer.models import ComposerModel
-from composer.optim import ComposerScheduler, DecoupledSGDW, compile_composer_scheduler
+from composer.optim import ComposerScheduler, DecoupledSGDW, compile_composer_scheduler, compile_composer_independent_schedulers
 from composer.profiler import Profiler
 from composer.trainer._deepspeed import _fix_batch_precision_for_deepspeed, _parse_deepspeed_config
 from composer.trainer._scale_schedule import scale_pytorch_scheduler
@@ -205,23 +205,28 @@ def _compile_schedulers(
     schedulers: Optional[Union[Scheduler, Sequence[Scheduler]]],
     state: State,
     scale_schedule_ratio: float,
+    independent_param_groups: bool = False,
 ) -> List[LRScheduler]:
     compiled_schedulers = []
-    for scheduler in ensure_tuple(schedulers):
-        if isinstance(scheduler, LRScheduler):
-            scale_pytorch_scheduler(scheduler, scale_schedule_ratio)
-            compiled_schedulers.append(scheduler)
-        # It's a composer scheduler
-        else:
-            compiled_schedulers.append(
-                compile_composer_scheduler(
-                    scheduler,
-                    # NOTE: Passing a weakref to avoid circular reference
-                    weakref.proxy(state),
-                    # state,
-                    scale_schedule_ratio,
-                ),
-            )
+    if not independent_param_groups:
+        for scheduler in ensure_tuple(schedulers):
+            if isinstance(scheduler, LRScheduler):
+                scale_pytorch_scheduler(scheduler, scale_schedule_ratio)
+                compiled_schedulers.append(scheduler)
+            # It's a composer scheduler
+            else:
+                compiled_schedulers.append(
+                    compile_composer_scheduler(
+                        scheduler,
+                        # NOTE: Passing a weakref to avoid circular reference
+                        weakref.proxy(state),
+                        # state,
+                        scale_schedule_ratio,
+                    ),
+                )
+    else:
+        compiled_schedulers = compile_composer_independent_schedulers(schedulers, state, scale_schedule_ratio) # type: ignore[reportArgumentType]
+       
 
     return compiled_schedulers
 
@@ -1147,8 +1152,10 @@ class Trainer:
 
         # compile config for PyTorch 2.0 or higher
         compile_config: Optional[Dict[str, Any]] = None,
+        independent_param_groups: bool = False,
     ):
 
+        self.independent_param_groups = independent_param_groups
         self.auto_log_hparams = auto_log_hparams
         self.python_log_level = python_log_level
         if self.python_log_level is not None:
@@ -1592,7 +1599,7 @@ class Trainer:
         self.logger.log_hyperparameters({'rank_zero_seed': rank_zero_seed})
 
         # Schedulers
-        self.state.schedulers = _compile_schedulers(schedulers, self.state, scale_schedule_ratio)
+        self.state.schedulers = _compile_schedulers(schedulers, self.state, scale_schedule_ratio, independent_param_groups)
         if scale_schedule_ratio != 1.0:
             if len(self.state.schedulers) == 0:
                 raise ValueError('Specifying `scale_schedule_ratio` without `schedulers` has no effect.')
@@ -2195,7 +2202,7 @@ class Trainer:
             # to train with it.
             self.state.max_duration = _scale_max_duration_by_ssr(scale_schedule_ratio, self.state.max_duration)
         if schedulers is not None:
-            self.state.schedulers = _compile_schedulers(schedulers, self.state, scale_schedule_ratio)
+            self.state.schedulers = _compile_schedulers(schedulers, self.state, scale_schedule_ratio, self.independent_param_groups)
 
             if step_schedulers_every_batch is None:
                 self._scheduler_step_frequency = _get_default_scheduler_frequency(schedulers)
