@@ -189,13 +189,9 @@ class NoiseScaleMonitor(Callback):
         self.running_squared_gradients_estimate: float | None = None
         # Initialize the store of gradients accumulated
         self.last_gradients_store: dict[str, torch.Tensor] = {}
-        self.g_small_layer_l2norm_squared: dict[str, torch.Tensor] = {}
         self.g_small_l2norm_squared = torch.tensor(0.0)
-        self.g_big_l2norm_squared = torch.tensor(0.0)
 
     def after_backward(self, state: State, logger: Logger) -> None:
-        self.g_small_l2norm_squared = torch.tensor(0.0)
-        self.g_big_l2norm_squared = torch.tensor(0.0)
         # NOTE: This event is triggered after the `loss.backward()` call of a microbatch has been completed. Depending on the sharding strategy and its underlying synchronization mechanism, the gradients contained in the `p.grad` variables (`for _name, p in state.model.named_parameters()`) could have been already synchronized across all ranks or not. We assume here that the gradients are synchronized across all ranks every microbatch step, which is the default behavior, see Trainer._train_microbatches() function. When this assumption hold true, at this stage of the pipeline each rank has the same gradients.
         if self.is_first_step:
             warnings.warn(
@@ -210,29 +206,23 @@ class NoiseScaleMonitor(Callback):
         # Increment the number of microbatches seen (number of accumulation steps).
         self.num_microbatches += 1
         # Loop over gradient vectors and update the accumulators
-        current_gradient_increment: dict[str, torch.Tensor] = {}
         grads_small: list[torch.Tensor] = []
-        grads_big: list[torch.Tensor] = []
         for name, p in state.model.named_parameters():
             if p.grad is not None and p.requires_grad:
-                grads_small.append(p.grad.flatten().view(-1, 1).detach().clone())
-                grads_big.append(p.grad.flatten().view(-1, 1).detach().clone())
+                if name not in self.last_gradients_store:
+                    self.last_gradients_store[name] = p.grad.flatten().detach().clone()
+                    grad_increment = p.grad.flatten().detach().clone()
+                else:
+                    grad_increment = (p.grad.flatten().detach().clone() - self.last_gradients_store[name].detach().clone())
+                    self.last_gradients_store[name] = p.grad.flatten().detach().clone()
+                grads_small.append(grad_increment)
         
         grad_small = torch.cat(grads_small)
         # NOTE: The current scaling factor of `grad_small` before AVG-AllReduce across ranks is not 1/self.num_microbatches, which is the correct one since it should correspond to one microbatch contribution for each microbatch step performed, but \frac{1}{n}, where $n$ is the final number of microbatch steps, which is the correct one for accumulating up until the very end. To obtain the correct scaling factor, we must multiply the `grad_small` tensor by a factor $n$//self.num_microbatches, where $n=\frac{B}{W\times b$ is the number of microbatch steps, $B$ is the global batch size, $W$ is the number of workers, and $b$ is the microbatch size. Notably, the same factor holds for correcting the AVG-AllReduced across ranks `grad_small`.
         l2_norm_grad_small = (grad_small**2).sum()
         if dist.is_initialized() and dist.get_world_size() > 1:
             dist.all_reduce(l2_norm_grad_small)
-            l2_norm_grad_small.div_(dist.get_world_size())
         self.g_small_l2norm_squared.add_(l2_norm_grad_small.to(self.g_small_l2norm_squared.device))
-        
-        # NOTE: When using no_sync context, the average of the `grad_big` across ranks is the correct $G_{big}$ with the correct scaling factor, \frac{b}{B}, where $b$ is the microbatch size and $B$ is the global batch size, as there are $W\times n$ contributions of weight $b$ samples, where $W$ is the number of workers and $n=\frac{B}{W\times b}$ is the number of microbatch steps.
-        grad_big = torch.cat(grads_big)
-        if dist.is_initialized() and dist.get_world_size() > 1:
-            dist.all_reduce(grad_big)
-            grad_big.div_(dist.get_world_size())
-        l2_norm_grad_big = (grad_big**2).sum()
-        self.g_big_l2norm_squared.add_(l2_norm_grad_big.to(self.g_big_l2norm_squared.device))
         
 
     def batch_end(self, state: State, logger: Logger) -> None:
@@ -249,70 +239,17 @@ class NoiseScaleMonitor(Callback):
         assert state.scaler is not None, "The scaler must be set"
         state.scaler.update(1.0)
 
-        # second_g_small_l2_norm_accumulator: dict[str, torch.Tensor] = {}
-        # if dist.is_initialized() and dist.get_world_size() > 1:
-        #     for name in self.last_gradients_store.keys():
-        #         second_g_small_l2_norm_accumulator[name] = torch.sum(self.last_gradients_store[name]**2).clone()
-        #         dist.all_reduce(self.last_gradients_store[name], reduce_operation="SUM")
-        #         dist.all_reduce(second_g_small_l2_norm_accumulator[name], reduce_operation="SUM")
-        #         # self.last_gradients_store[name].div_(dist.get_world_size())
-        #         # second_g_small_l2_norm_accumulator[name].div_(dist.get_world_size())
-
-        # # NOTE: Loop over gradient vectors and update the store of the current gradients accumulated
-        # for name, p in state.model.named_parameters():
-        #     if p.grad is not None and p.requires_grad:
-        #         # NOTE: We must not clip here as the tensor is scaled by the scaler. The clipping, if applied, must act on the unscaled tensors.
-        #         if name in self.last_gradients_store:
-        #             self.last_gradients_store[name].mul_(.0)
-        #             self.last_gradients_store[name].add_(p.grad.flatten().view(-1, 1).clone())
-        #         else:
-        #             self.last_gradients_store[name] = p.grad.flatten().view(-1, 1).clone()
-
-        # # Put accumulators in a list for easier manipulation
-        # last_gradients_store_list = [g for g in self.last_gradients_store.values()]
-        # g_small_layer_l2norm_squared_list = [g for g in self.g_small_layer_l2norm_squared.values()]
-        # clip_tensor_norm_(
-        #     g_small_layer_l2norm_squared_list,
-        #     1.0,
-        # )
-
-        # # NOTE: Unscale the gradients of the big batch
-        # assert state.scaler is not None, "The scaler must be set"
-        # log.info(f"NoiseScaleMonitor: State is using a {type(state.scaler)} with scale={state.scaler._scale.double()}")        
-        # inv_scale = state.scaler._scale.double().reciprocal().float()
-        # found_inf = torch.full((), 0.0, dtype=torch.float32, device=state.scaler._scale.device)
-        # found_inf_per_device = unscale_grads(
-        #     last_gradients_store_list, inv_scale, found_inf, False
-        # )
-        # log.info(f"NoiseScaleMonitor: G_big unscaled, found_inf_per_device={found_inf_per_device}")
-
-        # # NOTE: This clips the accumulated gradients and the single microbatch ones separately one a per-layer L2 norm of value one.
-        # for g_big_accumulated_name in self.last_gradients_store.keys():
-        #     clip_tensor_norm_(
-        #         self.last_gradients_store[g_big_accumulated_name],
-        #         1.0,
-        #     )
-        # for g_small_accumulated_name in self.g_small_layer_l2norm_squared.keys():
-        #     clip_tensor_norm_(
-        #         self.g_small_layer_l2norm_squared[g_small_accumulated_name],
-        #         1.0,
-        #     )
-
-        # # Compute the L2 norms of the final version of the gradients, the that has been used by the optimizer.
-        # # g_big_layer_l2norm_squared: dict[str, torch.Tensor] = {}
-        # g_big_l2norm_squared: torch.Tensor = torch.tensor(0.0)
-        # grads: list[torch.Tensor] = []
-        # for name in self.last_gradients_store.keys():
-        #     grads.append(self.last_gradients_store[name].to(g_big_l2norm_squared.device))
-        #     # self.last_gradients_store[name] = self.last_gradients_store[name].to(g_big_l2norm_squared.device)
-        #     # g_big_layer_l2norm_squared[f'l2_norm/grad/{name}'] = torch.sum((self.last_gradients_store[name].div(self.num_microbatches))**2)
-        #     # g_big_layer_l2norm_squared[f'l2_norm/grad/{name}'] = torch.sum((self.last_gradients_store[name].div(state.device_train_microbatch_size))**2)
-        #     # g_big_layer_l2norm_squared[f'l2_norm/grad/{name}'] = torch.sum((self.last_gradients_store[name].div(self.num_microbatches))**2)
-        #     # g_big_l2norm_squared.add_(torch.sum((self.last_gradients_store[name].div(state.device_train_microbatch_size))**2))
-        #     # g_big_l2norm_squared.add_(torch.sum((self.last_gradients_store[name])**2))
-        # grad = torch.cat(grads)
-        # # grad.div_(self.num_microbatches)
-        # g_big_l2norm_squared.add_((grad**2).sum())
+        # Compute the L2 norms of the final version of the gradients, the that has been used by the optimizer.
+        g_big_l2norm_squared: torch.Tensor = torch.tensor(0.0)
+        grads_big: list[torch.Tensor] = []
+        for name in self.last_gradients_store.keys():
+            last_grad = self.last_gradients_store[name]
+            if dist.is_initialized() and dist.get_world_size() > 1:
+                dist.all_reduce(last_grad)
+            grads_big.append(last_grad)
+        grad_big = torch.cat(grads_big)
+        l2_norm_grad_big = (grad_big**2).sum()
+        g_big_l2norm_squared.add_(l2_norm_grad_big.to(g_big_l2norm_squared.device))
 
         # # NOTE: If FSDP is enabled, the optimizer states may live on different ranks and must be reduced accordingly
         # if state.fsdp_enabled and dist.get_world_size() > 0:
@@ -333,19 +270,8 @@ class NoiseScaleMonitor(Callback):
         #         g_big_reduced = dist_reduce_metrics(g_big_reduced)
         #         g_small_reduced = dist_reduce_metrics(g_small_reduced)
         
-        # Sum the L2 norms of the gradients of all the layers
-        # self.g_small_l2norm_squared, g_big_l2norm_squared = .0, .0
-        # self.g_small_l2norm_squared.div_(self.num_microbatches)#  .div_(self.num_microbatches)
-        # g_big_l2norm_squared.div_(self.num_microbatches)#.div_(self.num_microbatches)
-        # for l2_grad in self.g_small_layer_l2norm_squared.values():
-        #     self.g_small_l2norm_squared += float(l2_grad.div(self.num_microbatches))
-        #     # self.g_small_l2norm_squared += float(l2_grad.div(state.device_train_microbatch_size))
-        #     # self.g_small_l2norm_squared += float(l2_grad)
-        # for l2_grad in g_big_layer_l2norm_squared.values():
-        #     g_big_l2norm_squared += float(l2_grad)
-        # self.g_small_l2norm_squared.mul_(self.num_microbatches**2)
         log.info("NoiseScaleMonitor: $|G_{{small}}|^2$=%s", self.g_small_l2norm_squared)
-        log.info("NoiseScaleMonitor: $|G_{{big}}|^2$=%s", self.g_big_l2norm_squared)
+        log.info("NoiseScaleMonitor: $|G_{{big}}|^2$=%s", g_big_l2norm_squared)
         
         # Compute the batch sizes $B_{small}$ and $B_{big}$ as the number of microbatches times the number of workers (we assume the gradients are synchronized across all ranks every microbatch step) and $B_{small}$ times the number of microbath steps, respectively. 
         
@@ -362,10 +288,10 @@ class NoiseScaleMonitor(Callback):
         log.info("NoiseScaleMonitor: $B_{{small}}$=%s", b_small)
         
         # Estimate the trace of the covariance matrix of the gradients
-        trace_estimate = (self.g_small_l2norm_squared.item() - self.g_big_l2norm_squared.item()) / ((1 / b_small) - (1 / b_big))
+        trace_estimate = (self.g_small_l2norm_squared.item() - g_big_l2norm_squared.item()) / ((1 / b_small) - (1 / b_big))
         log.info(f"NoiseScaleMonitor: trace estimate={trace_estimate}")
         # Estimate the squared norm of the gradients
-        squared_gradients_estimate = (b_big * self.g_big_l2norm_squared.item() - b_small * self.g_small_l2norm_squared.item()) / (b_big - b_small)
+        squared_gradients_estimate = (b_big * g_big_l2norm_squared.item() - b_small * self.g_small_l2norm_squared.item()) / (b_big - b_small)
         log.info(f"NoiseScaleMonitor: squared gradients estimate={squared_gradients_estimate}")
         
         # Compute exponential moving averages
@@ -392,7 +318,5 @@ class NoiseScaleMonitor(Callback):
 
         # Reset the store of gradients accumulated
         self.last_gradients_store.clear()
-        self.g_small_layer_l2norm_squared.clear()
         self.num_microbatches = 0
         self.g_small_l2norm_squared = torch.tensor(0.0)
-        self.g_big_l2norm_squared = torch.tensor(0.0)
