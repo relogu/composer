@@ -18,9 +18,9 @@ from composer.callbacks.memory_monitor import MemoryMonitor
 from composer.callbacks.memory_snapshot import MemorySnapshot
 from composer.callbacks.mlperf import MLPerfCallback
 from composer.callbacks.nan_monitor import NaNMonitor
+from composer.callbacks.noise_scale_monitor import NoiseScaleMonitor
 from composer.callbacks.oom_observer import OOMObserver
 from composer.callbacks.optimizer_monitor import OptimizerMonitor
-from composer.callbacks.noise_scale_monitor import NoiseScaleMonitor
 from composer.callbacks.runtime_estimator import RuntimeEstimator
 from composer.callbacks.speed_monitor import SpeedMonitor
 from composer.callbacks.system_metrics_monitor import SystemMetricsMonitor
