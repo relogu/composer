@@ -500,7 +500,7 @@ class State(Serializable):
         # Distributed training configs
         deepspeed_config: Optional[dict[str, Any]] = None,
         parallelism_config: Optional[ParallelismConfig] = None,
-        
+
         # Is the model of the fine-tuning type
         is_model_finetune: bool = False,
     ):
@@ -1322,9 +1322,7 @@ class State(Serializable):
         if model_on_rank:
             # Make sure we manipulate the loaded keys correctly in case of finetune model
             if self.is_model_finetune:
-                state_dict['model'] |= {
-                    f"transformer.{k}": v for k, v in state_dict['model'].items()
-                }
+                state_dict['model'] |= {f'transformer.{k}': v for k, v in state_dict['model'].items()}
             if version.parse(torch.__version__) >= version.parse('2.4.0') or (
                 version.parse(torch.__version__) >= version.parse('2.3.0') and dist.is_initialized()
             ):
@@ -1339,7 +1337,7 @@ class State(Serializable):
                             cpu_offload=self.fsdp_enabled,
                         ),
                     )
-                    log.warning(f"Set state dict to the model. Function returned: {return_tuple}")
+                    log.warning(f'Set state dict to the model. Function returned: {return_tuple}')
                 except AttributeError as e:
                     # Issue: https://github.com/pytorch/pytorch/issues/127351
                     if "ShardedTensor' object has no attribute 'placements'" in str(e):

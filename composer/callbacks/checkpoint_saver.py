@@ -493,7 +493,7 @@ class CheckpointSaver(Callback):  # noqa: D101
 
         # Add old checkpoints when the run is resumed with the same path
         for file in pathlib.Path(saved_path).parent.iterdir():
-            if saved_path not in str(file) and file not in self.saved_checkpoints and not file.is_symlink():  
+            if saved_path not in str(file) and file not in self.saved_checkpoints and not file.is_symlink():
                 self.saved_checkpoints.append(file)
 
         metadata_local_file_path = None

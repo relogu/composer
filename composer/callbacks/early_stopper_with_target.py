@@ -1,3 +1,8 @@
+# Copyright 2024 MosaicML Composer authors
+# SPDX-License-Identifier: Apache-2.0
+
+"""The module contains the EarlyStopperWithTarget callback, which stops training when a specified metric reaches a target value."""
+
 from __future__ import annotations
 
 import logging
@@ -14,6 +19,16 @@ __all__ = ['EarlyStopperWithTarget']
 
 
 class EarlyStopperWithTarget(Callback):
+    """Callback to stop training when a specified metric reaches a target value.
+
+    Args:
+        monitor (str): The name of the metric to monitor.
+        dataloader_label (str): The label of the dataloader ('train', 'eval', or evaluator name).
+        target_value (float): The target value for the monitored metric.
+        comp (Optional[Union[str, Callable[[Any, Any], Any]]]): Comparison operator. Can be 'greater', 'gt', 'less', 'lt', or a callable. Defaults to None.
+        min_delta (float): Minimum change to qualify as an improvement. Defaults to 0.0.
+        patience (Union[int, str, Time]): Number of epochs or batches to wait for an improvement before stopping. Defaults to 1.
+    """
 
     def __init__(
         self,
@@ -77,13 +92,14 @@ class EarlyStopperWithTarget(Callback):
                 is_patience_exceeded = True
         else:
             raise ValueError(f'The units of `patience` should be EPOCH or BATCH.')
-        
+
         # If we passed the patience threshold, check the value of the monitored metric
         if is_patience_exceeded:
             # Get the monitored metric
             metric_val = self._get_monitored_metric(state)
             # Compare the monitored metric to the target value
-            if self.comp_func(metric_val, self.target_value) and torch.abs(metric_val - self.target_value) > self.min_delta:
+            if self.comp_func(metric_val,
+                              self.target_value) and torch.abs(metric_val - self.target_value) > self.min_delta:
                 state.stop_training()
 
     def eval_end(self, state: State, logger: Logger) -> None:
