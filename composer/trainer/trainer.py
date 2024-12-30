@@ -17,6 +17,7 @@ import tempfile
 import textwrap
 import time
 import warnings
+import weakref
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
@@ -32,7 +33,6 @@ from typing import (
     Union,
     cast,
 )
-import weakref
 
 import coolname
 import torch
@@ -1184,7 +1184,7 @@ class Trainer:
 
         # compile config for PyTorch 2.0 or higher
         compile_config: Optional[dict[str, Any]] = None,
-        
+
         # Is the model of the fine-tuning type
         is_model_finetune: bool = False,
     ):
@@ -3992,4 +3992,3 @@ class Trainer:
             input_names=input_names,
             output_names=output_names,
         )
-    
