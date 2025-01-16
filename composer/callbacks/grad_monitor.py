@@ -3,6 +3,7 @@
 
 """Monitor gradients during DDP training."""
 
+from typing import Optional
 import torch
 
 from composer.core import Callback, State
@@ -39,6 +40,7 @@ class GradMonitor(Callback):
         self.executed_steps = 0
         # NOTE: May want to make this configurable
         self.device = torch.device("cpu")
+        self.grads: Optional[dict[str, torch.Tensor]] = None
 
     def _extract_grads(
         self, state: State
@@ -58,7 +60,7 @@ class GradMonitor(Callback):
                 grad_dict[name] = p.grad.to(self.device).detach().clone()
 
         # average the gradients
-        prev_grads = state.grads
+        prev_grads = self.grads
         if prev_grads:
             aver_grad_dict = {
                 name: (
@@ -71,7 +73,7 @@ class GradMonitor(Callback):
             aver_grad_dict = grad_dict
         self.executed_steps = self.executed_steps + 1
 
-        state.grads = aver_grad_dict
+        self.grads = aver_grad_dict
 
     def after_backward(self, state: State, logger: Logger) -> None:
         """Extract gradients on event ``Event.AFTER_BACKWARD`` in the function of _train_microbatch."""
@@ -81,14 +83,14 @@ class GradMonitor(Callback):
         
     def batch_end(self, state: State, logger: Logger) -> None:
         """Sync gradient store on ``Event.BATCH_END`` in the function of _train_microbatch."""
-        assert state.grads is not None, "state.grads should not be None if this callback is used"
+        assert self.grads is not None, "self.grads should not be None if this callback is used"
         if dist.is_initialized() and dist.get_world_size() > 1:
-            for name in state.grads.keys():
-                last_grad = state.grads[name]
+            for name in self.grads.keys():
+                last_grad = self.grads[name]
                 
                 dist.all_reduce(last_grad)
                 last_grad.div_(dist.get_world_size())
                 
                 # Should not be necessary, but just in case
-                state.grads[name] = last_grad
+                self.grads[name] = last_grad
         

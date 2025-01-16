@@ -496,7 +496,7 @@ class State(Serializable):
         parallelism_config: Optional[ParallelismConfig] = None,
 
         # Is the model of the fine-tuning type
-        is_model_finetune: bool = False,   
+        is_model_finetune: bool = False,
     ):
         self.rank_zero_seed = rank_zero_seed
         self.model = model
@@ -591,9 +591,6 @@ class State(Serializable):
         self.total_loss_dict: dict[str, float] = {}
 
         self.metric_outputs: dict[str, Any] = {}
-        
-        # average model grads of all batches in one global round
-        self.grads: Optional[dict[str, torch.Tensor]] = None
 
     def _validate_parallelism_configs(self):
         # Validate TP config
