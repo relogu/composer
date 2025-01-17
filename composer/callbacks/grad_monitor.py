@@ -36,10 +36,11 @@ class GradMonitor(Callback):
 
     def __init__(
         self,
+        device: str,
     ) -> None:
         self.executed_steps = 0
         # NOTE: May want to make this configurable
-        self.device = torch.device("cpu")
+        self.device = torch.device(device)
         self.grads: Optional[dict[str, torch.Tensor]] = None
 
     def _extract_grads(
@@ -77,9 +78,9 @@ class GradMonitor(Callback):
 
     def after_backward(self, state: State, logger: Logger) -> None:
         """Extract gradients on event ``Event.AFTER_BACKWARD`` in the function of _train_microbatch."""
-        # NOTE: Inefficient, if we know when the last microbatch is called we can avoid this
-        # TODO: Lorenzo, lmk where we can set the number of microbatches
-        self._extract_grads(state)
+        assert hasattr(state, "is_final_microbatch"), "Attribute required to avoid inefficiency"
+        if state.is_final_microbatch: # type: ignore[reportAttributeAccessIssue]
+            self._extract_grads(state)
         
     def batch_end(self, state: State, logger: Logger) -> None:
         """Sync gradient store on ``Event.BATCH_END`` in the function of _train_microbatch."""

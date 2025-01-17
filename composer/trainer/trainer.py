@@ -3082,7 +3082,10 @@ class Trainer:
 
             for microbatch_idx, self.state.batch in enumerate(microbatches):
                 is_final_microbatch = microbatch_idx + 1 == len(microbatches)
+                setattr(self.state, 'is_final_microbatch', is_final_microbatch)
                 microbatch_loss_dict = self._train_microbatch(use_grad_scaling, current_batch_size, is_final_microbatch)
+                delattr(self.state, 'is_final_microbatch')
+                assert not hasattr(self.state, 'is_final_microbatch'), "Something went wrong in attribute deletion"
 
                 # Aggregate each loss in microbatch_loss_dict into total_loss_dict
                 for k, microbatch_loss in microbatch_loss_dict.items():
