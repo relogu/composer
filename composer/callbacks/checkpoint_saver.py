@@ -616,6 +616,8 @@ class CheckpointSaver(Callback):  # noqa: D101
             self._rotate_checkpoints(sharding_enabled=state.fsdp_sharded_state_dict_enabled)
 
     def _rotate_checkpoints(self, sharding_enabled: bool = False):
+        # Assuming epoch and batch indices increase monotonically
+        self.saved_checkpoints = sorted(self.saved_checkpoints)
         while len(self.saved_checkpoints) > self.num_checkpoints_to_keep:
             prefix_dir = None
             checkpoint_to_delete = self.saved_checkpoints.pop(0)
