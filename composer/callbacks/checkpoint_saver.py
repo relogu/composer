@@ -617,7 +617,7 @@ class CheckpointSaver(Callback):  # noqa: D101
 
     def _rotate_checkpoints(self, sharding_enabled: bool = False):
         # Assuming epoch and batch indices increase monotonically
-        self.saved_checkpoints = sorted(self.saved_checkpoints)
+        self.saved_checkpoints = sorted(self.saved_checkpoints, key=lambda x: self.all_saved_checkpoints_to_timestamp[x].batch.value)
         removed_checkpoints: list[str] = []
         while len(self.saved_checkpoints) > self.num_checkpoints_to_keep:
             prefix_dir = None
@@ -631,7 +631,7 @@ class CheckpointSaver(Callback):  # noqa: D101
             else:
                 if dist.get_global_rank() == 0:
                     shutil.rmtree(prefix_dir)
-        log.info("Removed checkpoints: %s", removed_checkpoints)
+        log.debug("Removed checkpoints: %s", removed_checkpoints)
 
     def _log_checkpoint_upload(self, logger: Logger):
         for destination in logger.destinations:
