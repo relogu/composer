@@ -636,12 +636,12 @@ class CheckpointSaver(Callback):  # noqa: D101
                 ],
                 key=operator.itemgetter(1),
         )
+        pairs = [(ep,ba) for ep,ba,_ in sorted_triplets]
         self.saved_checkpoints = [path for _,_,path in sorted_triplets]
-        removed_checkpoints: list[str] = []
+        log.debug("Sorted checkpoints (ep,ba): %s", pairs)
         while len(self.saved_checkpoints) > self.num_checkpoints_to_keep:
             prefix_dir = None
             checkpoint_to_delete = self.saved_checkpoints.pop(0)
-            removed_checkpoints.append(checkpoint_to_delete)
             prefix_dir = str(Path(checkpoint_to_delete).parent)
             if not sharding_enabled:
                 try:
@@ -651,7 +651,7 @@ class CheckpointSaver(Callback):  # noqa: D101
             else:
                 if dist.get_global_rank() == 0:
                     shutil.rmtree(prefix_dir)
-        log.debug("Removed checkpoints: %s", removed_checkpoints)
+        
 
     def _log_checkpoint_upload(self, logger: Logger):
         for destination in logger.destinations:
