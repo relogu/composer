@@ -641,6 +641,7 @@ class CheckpointSaver(Callback):  # noqa: D101
         while len(self.saved_checkpoints) > self.num_checkpoints_to_keep:
             prefix_dir = None
             checkpoint_to_delete = self.saved_checkpoints.pop(0)
+            removed_checkpoints.append(checkpoint_to_delete)
             prefix_dir = str(Path(checkpoint_to_delete).parent)
             if not sharding_enabled:
                 try:
