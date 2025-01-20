@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import logging
+import operator
 import os
 import pathlib
+import re
 import shutil
 import tempfile
 import textwrap
@@ -618,7 +620,23 @@ class CheckpointSaver(Callback):  # noqa: D101
     def _rotate_checkpoints(self, sharding_enabled: bool = False):
         while len(self.saved_checkpoints) > self.num_checkpoints_to_keep:
             prefix_dir = None
-            self.saved_checkpoints = sorted(self.saved_checkpoints)
+            # Assuming epoch and batch indices increase monotonically
+            sorted_triplets = sorted(
+                [
+                    (
+                        int(reg.group(1)),  # epoch number
+                        int(reg.group(2)),  # number of batches
+                        path,
+                    ) for path in self.saved_checkpoints if (reg := re.search(
+                        r'/ep(\d+)-ba(\d+)',
+                        path,
+                    )) is not None
+                ],
+                key=operator.itemgetter(1),
+            )
+            pairs = [(ep, ba) for ep, ba, _ in sorted_triplets]
+            self.saved_checkpoints = [path for _, _, path in sorted_triplets]
+            log.debug('Sorted checkpoints (ep,ba): %s', pairs)
             checkpoint_to_delete = self.saved_checkpoints.pop(0)
             prefix_dir = str(Path(checkpoint_to_delete).parent)
             if not sharding_enabled:
