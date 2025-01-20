@@ -360,8 +360,7 @@ class LinearScheduler(ComposerScheduler):
 
 
 class SqrtScheduler(ComposerScheduler):
-    """
-    A scheduler that adjusts the learning rate following a square root decay schedule.
+    """A scheduler that adjusts the learning rate following a square root decay schedule.
 
     Args:
         t_duration (Union[str, Time]): The duration over which the learning rate is decayed.
@@ -377,8 +376,7 @@ class SqrtScheduler(ComposerScheduler):
         self.t_duration = Time.from_timestring(t_duration) if isinstance(t_duration, str) else t_duration
 
     def __call__(self, state: State, ssr: float = 1.0) -> float:
-        """
-        Calculate the learning rate multiplier based on the current state and schedule.
+        """Calculate the learning rate multiplier based on the current state and schedule.
 
         Args:
             state (State): The current state of training.
@@ -951,9 +949,8 @@ class CosineAnnealingWithWarmupScheduler(ComposerScheduler):
 
 
 class ConstantWithLinearCooldownWithWarmupScheduler(ComposerScheduler):
-    """
-    A scheduler that maintains a constant learning rate with optional linear warmup and cooldown periods.
-    
+    """A scheduler that maintains a constant learning rate with optional linear warmup andcooldown periods.
+
     Inspired by https://arxiv.org/abs/2405.18392v3.
 
     Args:
@@ -990,8 +987,7 @@ class ConstantWithLinearCooldownWithWarmupScheduler(ComposerScheduler):
         self.cooldown_scheduler = LinearScheduler(alpha_i=1.0, alpha_f=0.0, t_max=t_cooldown)
 
     def __call__(self, state: State, ssr: float = 1.0) -> float:
-        """
-        Calculate the learning rate multiplier based on the current state and schedule.
+        """Calculate the learning rate multiplier based on the current state and schedule.
 
         Args:
             state (State): The current state of training.
@@ -1001,12 +997,12 @@ class ConstantWithLinearCooldownWithWarmupScheduler(ComposerScheduler):
             float: The learning rate multiplier.
         """
         assert state.max_duration is not None, 'max_duration should be set whenever schedulers are invoked'
-        
+
         # Convert warmup, cooldown, and max durations to the appropriate time units
         t_warmup = _convert_time(self.t_warmup, state)
         t_cooldown = _convert_time(self.t_cooldown, state)
         t_max = _convert_time(self.t_max, state, ssr=ssr)
-        
+
         # Raise errors if warmup, cooldown, or max durations are incompatible
         _raise_if_warmup_and_max_incompatible(t_warmup, t_max)
         _raise_if_cooldown_and_max_incompatible(t_cooldown, t_max)
@@ -1024,15 +1020,14 @@ class ConstantWithLinearCooldownWithWarmupScheduler(ComposerScheduler):
             if self.scale_cooldown:
                 return self.cooldown_scheduler(state, ssr)
             return self.cooldown_scheduler(state)
-        
+
         # Otherwise, return a constant learning rate multiplier of 1.0
         return 1.0
 
 
 class ConstantWithSqrtCooldownWithWarmupScheduler(ComposerScheduler):
-    """
-    A scheduler that maintains a constant learning rate with optional linear warmup and (1-sqrt) cooldown periods.
-    
+    """A scheduler that maintains a constant learning rate with optional linear warmup and (1-sqrt) cooldown periods.
+
     Inspired by https://arxiv.org/abs/2405.18392v3.
 
     Args:
@@ -1069,8 +1064,7 @@ class ConstantWithSqrtCooldownWithWarmupScheduler(ComposerScheduler):
         self.cooldown_scheduler = SqrtScheduler(t_max=t_max, t_duration=t_cooldown)
 
     def __call__(self, state: State, ssr: float = 1.0) -> float:
-        """
-        Calculate the learning rate multiplier based on the current state and schedule.
+        """Calculate the learning rate multiplier based on the current state and schedule.
 
         Args:
             state (State): The current state of training.
@@ -1080,12 +1074,12 @@ class ConstantWithSqrtCooldownWithWarmupScheduler(ComposerScheduler):
             float: The learning rate multiplier.
         """
         assert state.max_duration is not None, 'max_duration should be set whenever schedulers are invoked'
-        
+
         # Convert warmup, cooldown, and max durations to the appropriate time units
         t_warmup = _convert_time(self.t_warmup, state)
         t_cooldown = _convert_time(self.t_cooldown, state)
         t_max = _convert_time(self.t_max, state, ssr=ssr)
-        
+
         # Raise errors if warmup, cooldown, or max durations are incompatible
         _raise_if_warmup_and_max_incompatible(t_warmup, t_max)
         _raise_if_cooldown_and_max_incompatible(t_cooldown, t_max)
@@ -1103,7 +1097,7 @@ class ConstantWithSqrtCooldownWithWarmupScheduler(ComposerScheduler):
             if self.scale_cooldown:
                 return self.cooldown_scheduler(state, ssr)
             return self.cooldown_scheduler(state)
-        
+
         # Otherwise, return a constant learning rate multiplier of 1.0
         return 1.0
 
