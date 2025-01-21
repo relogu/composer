@@ -17,6 +17,8 @@ from composer.optim.decoupled_weight_decay import DecoupledAdamW, DecoupledSGDW
 from composer.optim.scheduler import (
     ComposerScheduler,
     ConstantScheduler,
+    ConstantWithLinearCooldownWithWarmupScheduler,
+    ConstantWithSqrtCooldownWithWarmupScheduler,
     ConstantWithWarmupScheduler,
     CosineAnnealingScheduler,
     CosineAnnealingWarmRestartsScheduler,
@@ -41,6 +43,8 @@ __all__ = [
     'CosineAnnealingScheduler',
     'CosineAnnealingWarmRestartsScheduler',
     'CosineAnnealingWithWarmupScheduler',
+    'ConstantWithLinearCooldownWithWarmupScheduler',
+    'ConstantWithSqrtCooldownWithWarmupScheduler',
     'ExponentialScheduler',
     'LinearScheduler',
     'LinearWithWarmupScheduler',

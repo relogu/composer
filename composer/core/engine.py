@@ -595,7 +595,7 @@ class Engine():
         try:
             for evaluator in state._evaluators:
                 try:
-                    evaluator.dataloader.dataloader._iterator._shutdown_workers(  # type: ignore[reportGeneralTypeIssues,reportOptionalMemberAccess]
+                    evaluator.dataloader.dataloader._iterator._shutdown_workers(   # type: ignore [reportGeneralTypeIssues, reportOptionalMemberAccess]
                     )
                 except AttributeError as e:
                     pass

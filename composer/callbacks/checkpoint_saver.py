@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import logging
+import operator
 import os
 import pathlib
+import re
 import shutil
 import tempfile
 import textwrap
@@ -464,7 +466,7 @@ class CheckpointSaver(Callback):  # noqa: D101
         # Add old checkpoints when the run is resumed with the same path
         for file in pathlib.Path(saved_path).parent.iterdir():
             if saved_path not in str(file) and file not in self.saved_checkpoints and not file.is_symlink():
-                self.saved_checkpoints.append(file)  # type: ignore[reportGeneralTypeIssues]
+                self.saved_checkpoints.append(file.stem)
 
         metadata_local_file_path = None
         if dist.get_global_rank() == 0 and state.fsdp_sharded_state_dict_enabled:
@@ -581,6 +583,23 @@ class CheckpointSaver(Callback):  # noqa: D101
     def _rotate_checkpoints(self, sharding_enabled: bool = False):
         while len(self.saved_checkpoints) > self.num_checkpoints_to_keep:
             prefix_dir = None
+            # Assuming epoch and batch indices increase monotonically
+            sorted_triplets = sorted(
+                [
+                    (
+                        int(reg.group(1)),  # epoch number
+                        int(reg.group(2)),  # number of batches
+                        path,
+                    ) for path in self.saved_checkpoints if (reg := re.search(
+                        r'/ep(\d+)-ba(\d+)',
+                        path,
+                    )) is not None
+                ],
+                key=operator.itemgetter(1),
+            )
+            pairs = [(ep, ba) for ep, ba, _ in sorted_triplets]
+            self.saved_checkpoints = [path for _, _, path in sorted_triplets]
+            log.debug('Sorted checkpoints (ep,ba): %s', pairs)
             checkpoint_to_delete = self.saved_checkpoints.pop(0)
             prefix_dir = str(Path(checkpoint_to_delete).parent)
             if not sharding_enabled:

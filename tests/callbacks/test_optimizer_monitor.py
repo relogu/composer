@@ -18,13 +18,10 @@ from tests.common.models import SimpleModel
 
 
 @pytest.mark.parametrize('log_optimizer_metrics', [True, False])
-@pytest.mark.parametrize('batch_log_interval', [1, 2, 3, 5])
-def test_optimizer_monitor(log_optimizer_metrics: bool, batch_log_interval: int):
+@pytest.mark.parametrize('interval', [1, 2, 3, 5])
+def test_optimizer_monitor(log_optimizer_metrics: bool, interval: int):
     # Construct the callback
-    grad_monitor = OptimizerMonitor(
-        log_optimizer_metrics=log_optimizer_metrics,
-        batch_log_interval=batch_log_interval,  # type: ignore[reportGeneralTypeIssues]
-    )
+    grad_monitor = OptimizerMonitor(log_optimizer_metrics=log_optimizer_metrics, interval=interval)
     in_memory_logger = InMemoryLogger()  # track the logged metrics in the in_memory_logger
     model = SimpleModel()
     # Construct the trainer and train
@@ -38,7 +35,7 @@ def test_optimizer_monitor(log_optimizer_metrics: bool, batch_log_interval: int)
     )
     trainer.fit()
     num_train_steps = int(trainer.state.timestamp.batch)
-    expected_num_calls = num_train_steps // batch_log_interval
+    expected_num_calls = num_train_steps // interval
 
     # Count the logged steps
     grad_norm_calls = len(in_memory_logger.data['l2_norm/grad/global'])
