@@ -618,6 +618,27 @@ class CheckpointSaver(Callback):  # noqa: D101
             self._rotate_checkpoints(sharding_enabled=state.fsdp_sharded_state_dict_enabled)
 
     def _rotate_checkpoints(self, sharding_enabled: bool = False):
+        # Assuming epoch and batch indices increase monotonically
+        sorted_triplets = sorted(
+                [
+                    (
+                        int(reg.group(1)),  # epoch number
+                        int(reg.group(2)),  # number of batches
+                        path,
+                    )
+                    for path in self.saved_checkpoints
+                    if (
+                        reg := re.search(
+                             r"/ep(\d+)-ba(\d+)", path
+                        )
+                    )
+                    is not None
+                ],
+                key=operator.itemgetter(1),
+        )
+        pairs = [(ep,ba) for ep,ba,_ in sorted_triplets]
+        self.saved_checkpoints = [path for _,_,path in sorted_triplets]
+        log.debug("Sorted checkpoints (ep,ba): %s", pairs)
         while len(self.saved_checkpoints) > self.num_checkpoints_to_keep:
             prefix_dir = None
             # Assuming epoch and batch indices increase monotonically
@@ -647,6 +668,7 @@ class CheckpointSaver(Callback):  # noqa: D101
             else:
                 if dist.get_global_rank() == 0:
                     shutil.rmtree(prefix_dir)
+        
 
     def _log_checkpoint_upload(self, logger: Logger):
         for destination in logger.destinations:
