@@ -20,36 +20,36 @@ import tabulate
 import yaml
 
 PRODUCTION_PYTHON_VERSION = '3.11'
-PRODUCTION_PYTORCH_VERSION = '2.4.0'
+PRODUCTION_PYTORCH_VERSION = '2.5.1'
 
 
 def _get_torchvision_version(pytorch_version: str):
-    if pytorch_version == '2.4.0':
-        return '0.19.0'
+    if pytorch_version == '2.5.1':
+        return '0.20.1'
+    if pytorch_version == '2.4.1':
+        return '0.19.1'
     if pytorch_version == '2.3.1':
         return '0.18.1'
-    if pytorch_version == '2.2.2':
-        return '0.17.2'
     raise ValueError(f'Invalid pytorch_version: {pytorch_version}')
 
 
 def _get_base_image(cuda_version: str):
     if not cuda_version:
-        return 'ubuntu:20.04'
+        return 'ubuntu:22.04'
     if cuda_version == '12.4.1':
-        return f'nvidia/cuda:12.4.1-cudnn-devel-ubuntu20.04'
-    return f'nvidia/cuda:{cuda_version}-cudnn8-devel-ubuntu20.04'
+        return f'nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04'
+    return f'nvidia/cuda:{cuda_version}-cudnn8-devel-ubuntu22.04'
 
 
 def _get_cuda_version(pytorch_version: str, use_cuda: bool):
     # From https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/
     if not use_cuda:
         return ''
-    if pytorch_version == '2.4.0':
+    if pytorch_version == '2.5.1':
+        return '12.4.1'
+    if pytorch_version == '2.4.1':
         return '12.4.1'
     if pytorch_version == '2.3.1':
-        return '12.1.1'
-    if pytorch_version == '2.2.2':
         return '12.1.1'
     raise ValueError(f'Invalid pytorch_version: {pytorch_version}')
 
@@ -112,8 +112,8 @@ def _get_pytorch_tags(python_version: str, pytorch_version: str, cuda_version: s
     tags = []
     cuda_version_tag = _get_cuda_version_tag(cuda_version)
     tags += [
-        f'{base_image_name}:{pytorch_version}_{cuda_version_tag}-python{python_version}-ubuntu20.04',
-        f'{ghcr_base_image_name}:{pytorch_version}_{cuda_version_tag}-python{python_version}-ubuntu20.04',
+        f'{base_image_name}:{pytorch_version}_{cuda_version_tag}-python{python_version}-ubuntu22.04',
+        f'{ghcr_base_image_name}:{pytorch_version}_{cuda_version_tag}-python{python_version}-ubuntu22.04',
     ]
 
     if python_version == PRODUCTION_PYTHON_VERSION and pytorch_version == PRODUCTION_PYTORCH_VERSION:
@@ -180,7 +180,7 @@ def _write_table(table_tag: str, table_contents: str):
 
 
 def _main():
-    python_pytorch_versions = [('3.11', '2.4.0'), ('3.11', '2.3.1'), ('3.11', '2.2.2')]
+    python_pytorch_versions = [('3.11', '2.5.1'), ('3.11', '2.4.1'), ('3.11', '2.3.1')]
     cuda_options = [True, False]
     stages = ['pytorch_stage']
     interconnects = ['mellanox', 'EFA']  # mellanox is default, EFA needed for AWS
@@ -244,7 +244,7 @@ def _main():
     composer_entries = []
 
     # The `GIT_COMMIT` is a placeholder and Jenkins will substitute it with the actual git commit for the `composer_staging` images
-    composer_versions = ['0.24.1']  # Only build images for the latest composer version
+    composer_versions = ['0.28.0']  # Only build images for the latest composer version
     composer_python_versions = [PRODUCTION_PYTHON_VERSION]  # just build composer against the latest
 
     for product in itertools.product(composer_python_versions, composer_versions, cuda_options):
@@ -294,7 +294,7 @@ def _main():
                 interconnect = 'EFA'
         cuda_version = f"{entry['CUDA_VERSION']} ({interconnect})" if entry['CUDA_VERSION'] else 'cpu'
         table.append([
-            'Ubuntu 20.04',  # Linux distro
+            'Ubuntu 22.04',  # Linux distro
             'Base',  # Flavor
             entry['PYTORCH_VERSION'],  # Pytorch version
             cuda_version,  # Cuda version

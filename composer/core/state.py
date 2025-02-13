@@ -52,13 +52,10 @@ from composer.utils import (
     dist,
     ensure_tuple,
     get_composer_env_dict,
-    is_model_deepspeed,
     reproducibility,
 )
 
 if TYPE_CHECKING:
-    import deepspeed
-
     from composer.core.algorithm import Algorithm
     from composer.core.callback import Callback
     from composer.core.evaluator import Evaluator
@@ -330,7 +327,6 @@ class State(Serializable):
         save_metrics (bool, optional): Whether to save metrics in state_dict.
         algorithms (Algorithm | Sequence[Algorithm], optional): The algorithms used for training.
         callbacks (Callback | Sequence[Callback], optional): The callbacks used for training.
-        deepspeed_config (dict[str, Any], optional): The configuration dictionary for deepspeed.
         parallelism_config (ParallelismConfig, optional): The configuration dictionary for parallelism.
         is_model_finetune (bool): Flag for knowing whether the model is of the finetune type. (default: ``False``)
 
@@ -398,9 +394,8 @@ class State(Serializable):
 
             .. note::
 
-                When using DeepSpeed or multi-rank training, the model will be wrapped with
-                :class:`~deepspeed.DeepSpeedEngine` or :class:`~torch.nn.parallel.DistributedDataParallel`,
-                respectively.
+                When using multi-rank training with DDP, the model will be wrapped with
+                :class:`~torch.nn.parallel.DistributedDataParallel`.
 
         outputs (torch.Tensor | Sequence[torch.Tensor]): The most recently computed output from the model's forward
             pass.
@@ -498,7 +493,6 @@ class State(Serializable):
         callbacks: Optional[Union[Callback, Sequence[Callback]]] = None,
 
         # Distributed training configs
-        deepspeed_config: Optional[dict[str, Any]] = None,
         parallelism_config: Optional[ParallelismConfig] = None,
 
         # Is the model of the fine-tuning type
@@ -547,7 +541,6 @@ class State(Serializable):
 
         self.profiler: Optional[Profiler] = None
 
-        self.deepspeed_config = deepspeed_config
         self.fsdp_config = parallelism_config.fsdp if parallelism_config is not None else None
         self.tp_config = parallelism_config.tp if parallelism_config is not None else None
 
@@ -617,6 +610,12 @@ class State(Serializable):
                     'Tensor parallelism (TP) currently requires FSDP with use_orig_params=True, '
                     'which is the default and recommended setting.',
                 )
+            if self.tp_config.tensor_parallel_degree == 1:
+                warnings.warn(
+                    'Received tensor_parallel_degree of 1, which is a no-op. Tensor parallelism will not be used.',
+                    UserWarning,
+                )
+                self.tp_config = None
 
         # Load monolith rank0 only
         if self.load_monolith_rank0_only:
@@ -878,11 +877,6 @@ class State(Serializable):
     @evaluators.setter
     def evaluators(self, evaluators: Union[Evaluator, Sequence[Evaluator]]):
         self._evaluators[:] = list(ensure_tuple(evaluators))
-
-    @property
-    def deepspeed_enabled(self):
-        """Indicates if deepspeed is enabled."""
-        return self.deepspeed_config is not None
 
     @property
     def fsdp_enabled(self):
@@ -1769,10 +1763,3 @@ class State(Serializable):
     def is_model_ddp(self):
         """Whether :attr:`model` is an instance of a :class:`.DistributedDataParallel`."""
         return isinstance(self.model, DistributedDataParallel)
-
-    @property
-    def deepspeed_model(self) -> deepspeed.DeepSpeedEngine:
-        """Cast :attr:`model` to :class:`~deepspeed.DeepSpeedEngine`."""
-        if is_model_deepspeed(self.model):
-            return cast('deepspeed.DeepSpeedEngine', self.model)
-        raise TypeError('state.model is not a DeepSpeed model')

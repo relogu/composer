@@ -498,7 +498,7 @@ def is_initialized():
     return dist.is_initialized()
 
 
-def initialize_dist(device: Union[str, Device], timeout: float = 300.0) -> None:
+def initialize_dist(device: Optional[Union[str, Device]] = None, timeout: float = 300.0) -> None:
     """Initialize the default PyTorch distributed process group.
 
     This function assumes that the following environment variables are set:
@@ -517,9 +517,9 @@ def initialize_dist(device: Union[str, Device], timeout: float = 300.0) -> None:
     .. seealso:: :func:`torch.distributed.init_process_group`
 
     Args:
-        device (str | Device): The device from which the distributed backend is
+        device (Optional[str | Device] ): The device from which the distributed backend is
             interpreted. Either a string corresponding to a device (one of ``'cpu'``,
-            ``'gpu'``, ``'mps'``, or ``'tpu'``) or a :class:`.Device`.
+            ``'gpu'``, ``'mps'``, or ``'tpu'``) or a :class:`.Device`. (default: ``None``)
         timeout (float, optional): The timeout for operations executed against the process
             group, expressed in seconds. (default: ``300.0``).
     """
@@ -592,6 +592,7 @@ def get_sampler(
     shuffle: bool = False,
     num_replicas: Optional[int] = None,
     rank: Optional[int] = None,
+    seed: int = 0,
 ):
     """Constructs a :class:`~torch.utils.data.distributed.DistributedSampler` for a dataset.
 
@@ -620,6 +621,7 @@ def get_sampler(
         shuffle=shuffle,
         num_replicas=get_world_size() if num_replicas is None else num_replicas,
         rank=get_global_rank() if rank is None else rank,
+        seed=seed,
     )
 
 

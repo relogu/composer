@@ -35,6 +35,7 @@ from composer.utils.checkpoint import (
     _COMPOSER_STATES_FILENAME,
     PartialFilePath,
     _ensure_valid_checkpoint,
+    _is_rng_key,
     _write_checkpoint_file,
     glob_filter,
 )
@@ -119,15 +120,31 @@ def _assert_checkpoints_equivalent(file1, file2, atol=0.0, rtol=0.0):
 
     deep_compare(checkpoint_1, checkpoint_2, atol=atol, rtol=rtol)
 
-    # deepspeed checkpoints do not have model or optimizer
-    # so either model, optimizer should be in all checkpoints or in none
+    # Model and optimizer should be in all checkpoints
     keys_in = (
         'model' in checkpoint_1['state'],
         'optimizers' in checkpoint_1['state'],
         'model' in checkpoint_2['state'],
         'optimizers' in checkpoint_2['state'],
     )
-    assert all(keys_in) or not any(keys_in)
+    assert all(keys_in)
+
+
+@pytest.mark.parametrize(
+    'key,value,expected_result',
+    [
+        ('rng.0.cuda', ('rng', '0', 'cuda'), True),
+        ('rng.0.torch', ('rng', '0', 'torch'), True),
+        ('rng.0.numpy', ('rng', '0', 'numpy'), True),
+        ('rng.0.python', ('rng', '0', 'python'), True),
+        ('rng.0', ('rng', '0'), False),
+        ('test.test.rng', ('test', 'test', 'rng'), False),
+        ('test.rng.test', ('test', 'rng', 'test'), False),
+        ('test.notatuple.test', 0, False),
+    ],
+)
+def test_is_rng_key(key: str, value: tuple, expected_result: bool):
+    assert _is_rng_key(key, value) == expected_result
 
 
 @pytest.mark.parametrize(
@@ -399,8 +416,11 @@ class TestCheckpointSaving:
     # See https://github.com/pytorch/pytorch/issues/133415
     @pytest.mark.xfail
     @pytest.mark.skipif(
-        version.parse(torch.__version__) < version.parse('2.4.0'),
-        reason='Test only applies to PyTorch 2.4+',
+        (
+            version.parse(torch.__version__) < version.parse('2.4.0') or
+            version.parse(torch.__version__) >= version.parse('2.5.0')
+        ),
+        reason='Test only applies to PyTorch 2.4.x',
     )
     def test_sgd_checkpoint(
         self,
@@ -861,7 +881,8 @@ class TestCheckpointLoading:
 
                     if delete_local:
                         # delete files locally, forcing trainer to look in object store
-                        shutil.rmtree('first')
+                        assert trainer_1._checkpoint_saver is not None
+                        shutil.rmtree(trainer_1._checkpoint_saver.folder)
 
                     trainer_2 = self.get_trainer(
                         latest_filename=latest_filename,
@@ -1521,13 +1542,10 @@ class TestCheckpointResumption:
         ],
     )
     @pytest.mark.parametrize(
-        'device,deepspeed_zero_stage',
+        'device',
         [
-            pytest.param('cpu', None, id='cpu-ddp'),
-            pytest.param('gpu', None, id='gpu-ddp', marks=pytest.mark.gpu),
-            pytest.param('gpu', 0, id='deepspeed-zero0', marks=pytest.mark.gpu),
-            pytest.param('gpu', 1, id='deepspeed-zero1', marks=pytest.mark.gpu),
-            pytest.param('gpu', 2, id='deepspeed-zero2', marks=pytest.mark.gpu),
+            pytest.param('cpu', id='cpu-ddp'),
+            pytest.param('gpu', id='gpu-ddp', marks=pytest.mark.gpu),
         ],
     )
     @pytest.mark.parametrize(
@@ -1573,11 +1591,11 @@ class TestCheckpointResumption:
     )
     # trainer_2 will call compute if checkpoint is already at end of epoch
     @pytest.mark.filterwarnings('ignore:The ``compute`` method of metric MulticlassAccuracy.*:UserWarning')
+    @pytest.mark.filterwarnings('ignore:No batches were trained*:UserWarning')
     def test_resumption(
         self,
         device: str,
         world_size: int,
-        deepspeed_zero_stage: Optional[int],
         save_interval: str,
         save_filename: str,
         resume_file: str,
@@ -1590,23 +1608,11 @@ class TestCheckpointResumption:
         tmp_paths = dist.all_gather_object(os.path.abspath(tmp_path))
         save_folder = pathlib.Path(tmp_paths[0])
 
-        if deepspeed_zero_stage:
-            deepspeed_config = {'zero_optimization': {'stage': deepspeed_zero_stage}}
-
-            # save_checkpoint appends .tar for deepspeed
-            if not is_tar(resume_file):
-                resume_file += '.tar'
-            if not is_tar(final_checkpoint):
-                final_checkpoint += '.tar'
-        else:
-            deepspeed_config = None
-
         trainer_1 = self.get_trainer(
             save_folder=os.path.join(save_folder, 'first'),
             save_filename=save_filename,
             save_interval=save_interval,
             eval_interval=save_interval,
-            deepspeed_config=deepspeed_config,
             seed=seed,
             device=device,
         )
@@ -1619,12 +1625,10 @@ class TestCheckpointResumption:
             save_interval=save_interval,
             num_epochs=2,  # set in get_trainer()
             num_batches_per_epoch=5,  # set in get_trainer()
-            is_deepspeed=deepspeed_config is not None,
         )
 
-        if not deepspeed_config:
-            # for DDP training, only rank 0 saves
-            resume_file = resume_file.format(rank=0)
+        # for DDP training, only rank 0 saves
+        resume_file = resume_file.format(rank=0)
 
         resume_file = os.path.join(save_folder, 'first', resume_file)
 
@@ -1633,7 +1637,6 @@ class TestCheckpointResumption:
             save_filename=save_filename,
             save_interval=save_interval,
             eval_interval=save_interval,
-            deepspeed_config=deepspeed_config,
             seed=seed,
             device=device,
             load_path=resume_file,  # <-- resume training from file
@@ -1677,6 +1680,33 @@ class TestCheckpointResumption:
         assert isinstance(trainer.state.train_dataloader.batch_sampler, DistributedSampler)
         # Epoch count starts at O
         assert trainer.state.train_dataloader.batch_sampler.epoch == max_duration - 1
+
+    @world_size(2)
+    @pytest.mark.gpu
+    def test_load_incorrect_path(self, world_size: int, tmp_path: pathlib.Path, caplog):
+        save_folder = tmp_path / 'checkpoints'
+        save_folder.mkdir(exist_ok=True)
+
+        # Attempt to load from an incorrect path
+        incorrect_path = str(tmp_path / 'nonexistent_checkpoint.pt')
+
+        with pytest.raises(FileNotFoundError) as exc_info:
+            self.get_trainer(
+                load_path=incorrect_path,
+                max_duration='1ep',
+            )
+
+        # Check error messages for each rank, ensure they are different.
+        if dist.get_global_rank() == 0:
+            assert f'Local path {incorrect_path} does not exist' in str(exc_info.value)
+        else:
+            assert 'No such file or directory:' in str(exc_info.value)
+            assert 'This likely implies a download failed on local rank 0, which is global rank 0' in str(
+                exc_info.value,
+            )
+            assert 'Please check the logs for global rank 0 to debug the checkpoint download issue.' in str(
+                exc_info.value,
+            )
 
     @pytest.mark.parametrize('spin_dataloaders', [False, True])
     def test_spin_dataloaders(
@@ -1747,7 +1777,6 @@ class TestCheckpointResumption:
         save_interval: str,
         num_epochs: int,
         num_batches_per_epoch: int,
-        is_deepspeed: bool,
     ):
         interval = Time.from_timestring(save_interval)
         if interval.unit == TimeUnit.EPOCH:
@@ -1755,10 +1784,6 @@ class TestCheckpointResumption:
         else:
             expected_num_files = ((num_batches_per_epoch * num_epochs - 1) // interval.value) + 1
         expected_num_files += 1  # account for symlink
-
-        if is_deepspeed:
-            # each rank saves
-            expected_num_files *= dist.get_world_size()
 
         files = os.listdir(save_folder)
         assert len(files) == expected_num_files
@@ -1773,30 +1798,21 @@ class TestCheckpointResumption:
 )
 @pytest.mark.parametrize('num_keep', list(range(-1, 5)))
 @pytest.mark.parametrize(
-    'device,deepspeed_enabled,zero_stage',
+    'device',
     [
-        pytest.param('cpu', False, None, id='cpu-ddp'),
-        pytest.param('gpu', False, None, id='gpu-ddp', marks=pytest.mark.gpu),
-        pytest.param('gpu', True, 0, id='deepspeed-zero0', marks=pytest.mark.gpu),
-        pytest.param('gpu', True, 1, id='deepspeed-zero1', marks=pytest.mark.gpu),
-        pytest.param('gpu', True, 2, id='deepspeed-zero2', marks=pytest.mark.gpu),
+        pytest.param('cpu', id='cpu-ddp'),
+        pytest.param('gpu', id='gpu-ddp', marks=pytest.mark.gpu),
     ],
 )
 def test_rotate_checkpoints(
     world_size,
     device,
-    deepspeed_enabled,
-    zero_stage,
     num_keep,
     tmp_path: pathlib.Path,
 ):
     # all ranks use rank 0 folder
     tmp_paths = dist.all_gather_object(os.path.abspath(tmp_path))
     save_folder = tmp_paths[0]
-
-    deepseed_config = None
-    if deepspeed_enabled:
-        deepseed_config = {'zero_optimization': {'stage': zero_stage}}
 
     train_dataset = RandomImageDataset()
 
@@ -1813,22 +1829,21 @@ def test_rotate_checkpoints(
         max_duration='6ba',
         save_num_checkpoints_to_keep=num_keep,
         device=device,
-        deepspeed_config=deepseed_config,
     )
 
     trainer.fit()
 
     dist.barrier()  # ensure all checkpoints rotated across ranks
 
-    # deepspeed saves 1 file per rank
+    # Only rank 0 saves files
     total_checkpoints = 6
     num_keep = num_keep if num_keep >= 0 else total_checkpoints
-    expected_num = num_keep if not deepspeed_enabled else num_keep * world_size
+    expected_num = num_keep
 
     files = glob(os.path.join(save_folder, 'checkpoint_*'))
     symlink_files = glob(os.path.join(save_folder, 'latest-rank*'))
     assert len(files) == expected_num
-    assert len(symlink_files) == ((1 if not deepspeed_enabled else world_size) if num_keep != 0 else 0)
+    assert len(symlink_files) == (1 if num_keep != 0 else 0)
 
     dist.barrier()  # all ranks finish before cleaning up tmpdir
 
