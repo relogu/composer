@@ -158,6 +158,7 @@ class NoiseScaleMonitor(Callback):
         trace_estimate = (self.g_small_l2norm_squared.item() - g_big_l2norm_squared.item()) / ((1 / b_small) -
                                                                                                (1 / b_big))
         # Estimate the squared norm of the gradients
+        # TODO: Make sure this is handled correctly with one microbatch step
         squared_gradients_estimate = (
             b_big * g_big_l2norm_squared.item() - b_small * self.g_small_l2norm_squared.item()
         ) / (b_big - b_small)
