@@ -29,7 +29,7 @@ from torch.optim.optimizer import (
     _view_as_real,
 )
 from torch.types import Number
-from torch.utils._foreacnh_utils import _get_fused_kernels_supported_devices
+from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ['ADOPT', 'adopt']
 
