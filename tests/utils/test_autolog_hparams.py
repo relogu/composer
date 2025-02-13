@@ -174,10 +174,7 @@ def test_extract_hparams_trainer():
         # Graceful Resumption
         'autoresume': False,
 
-        # DeepSpeed
-        'deepspeed_config': None,
-        'fsdp_config': None,
-        'fsdp_auto_wrap': True,
+        # Parallelism
         'parallelism_config': None,
 
         # System/Numerics

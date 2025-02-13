@@ -1,11 +1,11 @@
 <br />
 <p align="center">
     <a href="https://github.com/mosaicml/composer#gh-light-mode-only" class="only-light">
-      <img src="https://storage.googleapis.com/docs.mosaicml.com/images/header_light.svg" width="50%"/>
+      <img src="./docs/source/_static/logo-light-mode.png" width="50%"/>
     </a>
     <!-- SETUPTOOLS_LONG_DESCRIPTION_HIDE_BEGIN -->
     <a href="https://github.com/mosaicml/composer#gh-dark-mode-only" class="only-dark">
-      <img src="https://storage.googleapis.com/docs.mosaicml.com/images/header_dark.svg" width="50%"/>
+      <img src="./docs/source/_static/logo-dark-mode.png" width="50%"/>
     </a>
     <!-- SETUPTOOLS_LONG_DESCRIPTION_HIDE_END -->
 </p>
@@ -69,7 +69,7 @@ The heart of Composer is our Trainer abstraction: a highly optimized PyTorch tra
 
 Whether you’re training on 1 GPU or 512 GPUs, 50MB or 10TB of data - Composer is built to keep your workflow simple.
 
-- [**FSDP**](https://docs.mosaicml.com/projects/composer/en/stable/notes/distributed_training.html#fullyshardeddataparallel-fsdp): For large models that are too large to fit on GPUs, Composer has integrated PyTorch [FullyShardedDataParallelism](https://docs.mosaicml.com/projects/composer/en/stable/notes/distributed_training.html#fullyshardeddataparallel-fsdp) into our trainer and made it simple to efficiently parallelize custom models. We’ve found FSDP is competitive performance-wise with much more complex parallelism strategies. Alternatively, Composer also supports standard PyTorch distributed data parallelism (DDP) and Deepspeed execution.
+- [**FSDP**](https://docs.mosaicml.com/projects/composer/en/stable/notes/distributed_training.html#fullyshardeddataparallel-fsdp): For large models that are too large to fit on GPUs, Composer has integrated PyTorch [FullyShardedDataParallelism](https://docs.mosaicml.com/projects/composer/en/stable/notes/distributed_training.html#fullyshardeddataparallel-fsdp) into our trainer and made it simple to efficiently parallelize custom models. We’ve found FSDP is competitive performance-wise with much more complex parallelism strategies. Alternatively, Composer also supports standard PyTorch distributed data parallelism (DDP) execution.
 - [**Elastic sharded checkpointing**](https://docs.mosaicml.com/projects/composer/en/stable/notes/distributed_training.html#saving-and-loading-sharded-checkpoints-with-fsdp): Save on eight GPUs, resume on sixteen. Composer supports elastic sharded checkpointing, so you never have to worry if your sharded saved state is compatible with your new hardware setup.
 - **Data streaming:** Working with large datasets? Download datasets from cloud blob storage on the fly by integrating with MosaicML [StreamingDataset](https://github.com/mosaicml/streaming) during model training.
 
