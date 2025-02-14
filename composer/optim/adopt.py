@@ -1,11 +1,19 @@
 # Copyright 2024 MosaicML Composer authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Implementation of the ADOPT optimizer.
+r"""Implementation of the ADOPT optimizer.
 
 Paper: https://arxiv.org/abs/2411.02853
 Original code: https://github.com/iShohei220/adopt
 
+ADOPT (Adam with Optimal Rate for any \beta_2) is a gradient-based optimizer
+designed to fix the convergence of Adam while introducing an adaptive
+clipping step to stabilize updates and handle large gradients effectively.
+
+This module provides both the high-level :class:`ADOPT` class, an `Optimizer`
+subclass suitable for direct usage, and the low-level functional API
+:func:`adopt` that performs the same computations. Typically, users will
+instantiate the :class:`ADOPT` class.
 """
 
 from typing import Any, Callable, Optional, Union, cast
@@ -35,7 +43,17 @@ __all__ = ['ADOPT', 'adopt']
 
 
 def _default_clip_lambda(step: Number | Tensor | Any) -> float:
-    """Return the default clipping value for the given step."""
+    r"""Return the default clipping value for the given step.
+
+    By default, it uses :math:`\text{clip} = \text{step}^{0.25}`.
+
+    Args:
+        step (Number or Tensor or Any): The current iteration/step value
+            (can be a scalar Python number or a PyTorch Tensor).
+
+    Returns:
+        float: The clipping threshold for the given step.
+    """
     internal_step: int
     if isinstance(step, (Tensor)):
         internal_step = int(step.item())
@@ -46,9 +64,89 @@ def _default_clip_lambda(step: Number | Tensor | Any) -> float:
     return internal_step**0.25
 
 
-# TODO: Add docstrings
 class ADOPT(Optimizer):
-    """ADOPT optimizer."""
+    r"""Implements the ADOPT algorithm.
+
+    This is a variant of Adam designed to
+    converge optimally for any :math:`\beta_2`,
+    featuring an adaptive clipping
+    mechanism.
+
+    :class:`ADOPT` builds upon Adam with an additional per-step clipping of
+    normalized gradients. The clipping threshold can be controlled via a user-
+    defined function ``clip_lambda(step)`` or the default
+    :func:`_default_clip_lambda`.
+
+    The default threshold is :math:`\text{step}^{0.25}`, which was found to
+    stabilize updates over the training process.
+
+    This optimizer shares many of Adam's hyperparameters but modifies
+    the second moment computations and update rules to incorporate this
+    gradient clipping logic.
+
+    Args:
+        params (iterable or ParamsT): Iterable of parameters to optimize or
+            dicts defining parameter groups.
+        lr (float or Tensor, optional): Learning rate. Default: 1e-3.
+            If a ``Tensor`` is passed, ensure you set ``capturable=True``
+            and ``foreach=False`` if you want to capture it in a graph.
+        betas (Tuple[float, float], optional): Coefficients used for
+            computing running averages of gradient and its square
+            (default: (0.9, 0.9999)).
+        eps (float, optional): Term added to the denominator to improve
+            numerical stability (default: 1e-6).
+        clip_lambda (callable, optional): A function that, given the current
+            step (as a scalar), returns the clipping threshold. If
+            ``None``, the default clipping rule
+            :func:`_default_clip_lambda` is used. Default: None.
+        weight_decay (float, optional): Weight decay coefficient (default: 0.0).
+            If ``decouple=True``, it uses a decoupled weight decay
+            (sometimes known as AdamW-style). Otherwise, it follows the
+            original L2 regularization approach.
+        decouple (bool, optional): Whether to decouple weight decay (like AdamW)
+            or not. Default: False.
+        foreach (bool, optional): Whether to use the multi-tensor APIs.
+            When None, it will automatically decide. Default: None.
+        maximize (bool, optional): Wheter to maximize rather than minimize
+            the loss. Default: False.
+        capturable (bool, optional): Whether the optimizer should allow
+            gradient capture (for example, with CUDA graphs). Default: False.
+        differentiable (bool, optional): Whether the optimizer is being used
+            in a context that requires higher-order differentiation.
+            Default: False.
+        fused (bool, optional): Whether to use a fused version of the kernel
+            (if supported by PyTorch and if no constraints like
+            differentiability exist). Default: None.
+
+    Example:
+        >>> import torch
+        >>> from adopt_optimizer import ADOPT
+        >>>
+        >>> model = MyModel()
+        >>> optimizer = ADOPT(model.parameters(), lr=1e-3)
+        >>>
+        >>> for input, target in data:
+        ...     def closure():
+        ...         optimizer.zero_grad()
+        ...         loss = loss_fn(model(input), target)
+        ...         loss.backward()
+        ...         return loss
+        ...     loss = optimizer.step(closure)
+
+    .. note::
+        This optimizer does not support sparse gradients.
+
+    .. note::
+        The default clipping threshold scales as :math:`\text{step}^{0.25}`,
+        but you can override this by passing a custom ``clip_lambda(step)``
+        function.
+
+    .. warning::
+        Passing a ``Tensor`` for ``lr`` is only supported if
+        ``foreach=False`` or ``capturable=True``. Attempting to combine
+        ``lr`` as a ``Tensor`` with ``foreach=True`` and
+        ``capturable=False`` will raise an error.
+    """
 
     def __init__(
         self,
@@ -107,6 +205,18 @@ class ADOPT(Optimizer):
             raise RuntimeError('`fused` is not currently supported')
 
     def __setstate__(self, state):
+        """Set the state of the optimizer for backward compatibility.
+
+        Specifically, this handles the presence or absence of certain keys
+        in older checkpoints, ensures new keys are properly initialized,
+        and converts 'step' values to Tensor if needed.
+
+        Args:
+            state (dict): The optimizer state to set.
+
+        Returns:
+            None
+        """
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('maximize', False)
@@ -137,6 +247,25 @@ class ADOPT(Optimizer):
         exp_avg_sqs,
         state_steps,
     ):
+        """Initialize a parameter group for ADOPT updates.
+
+        This internal helper function:
+        - Filters out parameters that do not have gradients.
+        - Checks for sparse gradients (raising an error if found).
+        - Creates state entries (`step`, `exp_avg`, `exp_avg_sq`) if not already present.
+        - Appends valid parameters and their states to the respective lists.
+
+        Args:
+            group (dict): A dictionary representing a parameter group and its settings.
+            params_with_grad (list[Tensor]): List to store parameters that have gradients.
+            grads (list[Tensor]): List to store gradients of those parameters.
+            exp_avgs (list[Tensor]): List to store exponential moving averages of gradients.
+            exp_avg_sqs (list[Tensor]): List to store exponential moving averages of squared gradients.
+            state_steps (list[Tensor]): List to store the optimizer step counts for these parameters.
+
+        Returns:
+            bool: A flag indicating whether complex parameters exist in this group.
+        """
         has_complex = False
         for p in group['params']:
             if p.grad is None:
@@ -191,11 +320,18 @@ class ADOPT(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Perform a single optimization step.
+        """Performs a single ADOPT optimization step.
 
         Args:
-            closure (Callable, optional): A closure that reevaluates the model
-                and returns the loss.
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss. This is useful for, e.g., line search or
+                other techniques that re-evaluate the model multiple times per
+                iteration.
+
+        Returns:
+            Any or None: The loss, if the closure is provided and called,
+            otherwise None.
+
         """
         self._cuda_graph_capture_health_check()
 
@@ -254,39 +390,33 @@ ADOPT.__doc__ = (
     r"""Implements ADOPT algorithm.
 
     .. math::
-       \begin{aligned}
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{input}      : \gamma \text{(lr)}, \: \beta_1, \beta_2
-                \text{(betas)}, \: \theta_0 \text{(params)}, \: f(\theta) \text{(objective)},
-                \: \epsilon \text{ (epsilon)}                                                    \\
-            &\hspace{13mm}      \lambda \text{(weight decay)},  \: \textit{amsgrad},
-                \: \textit{maximize}                                                             \\
-            &\textbf{initialize} : m_0 \leftarrow 0 \text{ (first moment)}, v_0 \leftarrow 0
-                \text{ ( second moment)}, \: \widehat{v_0}^{max}\leftarrow 0              \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
+    \begin{aligned}
+        &\rule{110mm}{0.4pt}                                                                 \\
+        &\textbf{input}      : \alpha_t \text{ (lr)}, \: \beta_1, \beta_2 \text{ (betas)},
+           \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)},
+           \: \epsilon \text{ (epsilon)}, \: c_t \text{ (clip)}                              \\
+        &\textbf{initialize} : m_0 \leftarrow 0 \text{ (first moment)},
+           \quad v_0 \leftarrow g_0^2 \text{ (second moment)}                                 \\[-1.ex]
+        &\rule{110mm}{0.4pt}                                                                 \\
+        &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                          \\
 
-            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
-            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})          \\
-            &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}         \\
-            &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
-            &\hspace{5mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
-            &\hspace{5mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
-            &\hspace{5mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                   \\
-            &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
-            &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_t}^{max},
-                \widehat{v_t})                                                                   \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
-                \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
-            &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
-                \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-       \end{aligned}
+        &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                        \\
+        &\hspace{10mm}g_t \leftarrow -\nabla_{\theta} f(\theta_{t-1})                         \\
+        &\hspace{5mm}\textbf{else}                                                            \\
+        &\hspace{10mm}g_t \leftarrow \nabla_{\theta} f(\theta_{t-1})                          \\
+
+        &\hspace{5mm}m_t \leftarrow \beta_1 \, m_{t-1} \;+\;
+            \bigl(1 - \beta_1\bigr)\,\mathrm{Clip}\!\Bigl(
+                \frac{g_t}{\max\{\sqrt{v_{t-1}}, \,\epsilon\}},\, c_t
+            \Bigr)                                                                            \\
+
+        &\hspace{5mm}\theta_t \leftarrow \theta_{t-1} \;-\; \alpha_t \, m_t                  \\
+        &\hspace{5mm}v_t \leftarrow \beta_2 \, v_{t-1} \;+\;
+            \bigl(1 - \beta_2\bigr)\,g_t^2                                                    \\
+        &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+        &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+        &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+   \end{aligned}
 
     For further details regarding the algorithm we refer to the original research paper_.
     """ + rf"""
@@ -311,7 +441,6 @@ ADOPT.__doc__ = (
         {_fused_doc}
     .. _ADOPT: Modified Adam Can Converge with Any β2 with the Optimal Rate:
         https://arxiv.org/abs/2411.02853
-
     """
 )
 
@@ -338,6 +467,35 @@ def _single_tensor_adopt(
     differentiable: bool,
     has_complex: bool,
 ):
+    """Single-tensor implementation of ADOPT step.
+
+    Args:
+        params (list[Tensor]): List of parameters to be updated.
+        grads (list[Tensor]): List of gradients corresponding to the parameters.
+        exp_avgs (list[Tensor]): List of first moment (EMA of grads).
+        exp_avg_sqs (list[Tensor]): List of second moment (EMA of squared grads).
+        state_steps (list[Tensor]): List of step counters for each parameter.
+        grad_scale (Tensor or None): Not used in this implementation.
+        found_inf (Tensor or None): Not used in this implementation.
+        initial_lr (float or None): The initial learning rate to compute
+            the ratio for decoupled weight decay.
+        decouple (bool): Whether to apply decoupled weight decay (AdamW style).
+        clip_lambda (Callable or None): Function returning the clipping threshold
+            given the step.
+        beta1 (float): Exponential decay rate for the first moment.
+        beta2 (float): Exponential decay rate for the second moment.
+        lr (float or Tensor): Learning rate.
+        weight_decay (float): Weight decay coefficient.
+        eps (float): Term added to the denominator to improve numerical stability.
+        maximize (bool): Whether to maximize rather than minimize.
+        capturable (bool): Whether this optimizer should allow graph capture.
+        differentiable (bool): Whether this optimizer is used in a context
+            requiring differentiable optimization.
+        has_complex (bool): Indicates if any parameters are complex.
+
+    Raises:
+        RuntimeError: If any constraints (e.g., sparse gradients) are violated.
+    """
     assert grad_scale is None and found_inf is None
 
     if torch.jit.is_scripting():
@@ -426,6 +584,40 @@ def _multi_tensor_adopt(
     capturable: bool,
     differentiable: bool,
 ):
+    """Multi-tensor implementation of the ADOPT step.
+
+    This performs updates on groups of tensors to improve
+    performance when many parameters are involved.
+
+    Args:
+        params (list[Tensor]): List of parameters to be updated.
+        grads (list[Tensor]): List of gradients corresponding to the parameters.
+        exp_avgs (list[Tensor]): List of first moment (EMA of grads).
+        exp_avg_sqs (list[Tensor]): List of second moment (EMA of squared grads).
+        state_steps (list[Tensor]): List of step counters for each parameter.
+        grad_scale (Tensor or None): Not used in this implementation.
+        found_inf (Tensor or None): Not used in this implementation.
+        initial_lr (float or None): The initial learning rate to compute
+            the ratio for decoupled weight decay.
+        has_complex (bool): Indicates if any parameters are complex.
+        beta1 (float): Exponential decay rate for the first moment.
+        beta2 (float): Exponential decay rate for the second moment.
+        lr (float or Tensor): Learning rate.
+        clip_lambda (Callable or None): Function returning the clipping threshold
+            given the step.
+        weight_decay (float): Weight decay coefficient.
+        decouple (bool): Whether to apply decoupled weight decay (AdamW style).
+        eps (float): Term added to the denominator to improve numerical stability.
+        maximize (bool): Whether to maximize rather than minimize.
+        capturable (bool): Whether this optimizer should allow graph capture.
+        differentiable (bool): Whether this optimizer is used in a context
+            requiring differentiable optimization.
+
+    Raises:
+        RuntimeError: If ``lr`` is a ``Tensor`` combined with
+            ``capturable=False`` and ``foreach=True``, or if the JIT compiler
+            usage is not supported.
+    """
     if len(params) == 0:
         return
 
@@ -568,6 +760,35 @@ def _fused_adopt(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
+    """Fused implementation of the ADOPT step.
+
+    .. warning::
+        This is not yet implemented. It raises :class:`NotImplementedError`.
+
+    Args:
+        params (list[Tensor]): List of parameters.
+        grads (list[Tensor]): List of gradients.
+        exp_avgs (list[Tensor]): List of first moment (EMA of grads).
+        exp_avg_sqs (list[Tensor]): List of second moment (EMA of squared grads).
+        state_steps (list[Tensor]): List of step counters.
+        grad_scale (Tensor or None): Gradient scaling factor (if any).
+        found_inf (Tensor or None): Whether infinite grads were found (amp).
+        initial_lr (float or None): The initial learning rate for decoupled weight decay.
+        has_complex (bool): Indicates if any parameters are complex.
+        beta1 (float): Exponential decay rate for the first moment.
+        beta2 (float): Exponential decay rate for the second moment.
+        lr (float or Tensor): Learning rate.
+        clip_lambda (Callable or None): Function returning the clipping threshold.
+        weight_decay (float): Weight decay coefficient.
+        decouple (bool): Whether to apply decoupled weight decay.
+        eps (float): Epsilon for numerical stability.
+        maximize (bool): Whether to maximize rather than minimize.
+        capturable (bool): Whether this optimizer should allow graph capture.
+        differentiable (bool): Whether differentiable optimization is needed.
+
+    Raises:
+        NotImplementedError: This function is not implemented.
+    """
     raise NotImplementedError
 
 
@@ -598,9 +819,91 @@ def adopt(
     eps: float,
     maximize: bool,
 ):
-    r"""Functional API that performs ADOPT algorithm computation.
+    r"""Functional API that performs the ADOPT algorithm step.
 
-    TODO: Add more details
+    It directly applies the parameter updates in-place, modifying:
+    - ``params`` in place.
+    - ``exp_avgs`` (first moment).
+    - ``exp_avg_sqs`` (second moment).
+    - ``state_steps`` (step counters).
+
+    It provides options to use different internal implementations:
+    - Single-tensor (default).
+    - Multi-tensor (``foreach=True``).
+    - Fused (``fused=True``, if supported).
+
+    The fused implementation is currently unimplemented and raises an error.
+
+    Args:
+        params (list[Tensor]): List of parameters to update.
+        grads (list[Tensor]): List of gradients of the same shape as ``params``.
+        exp_avgs (list[Tensor]): Exponential moving averages of the gradients.
+        exp_avg_sqs (list[Tensor]): Exponential moving averages of the
+            squared gradients.
+        state_steps (list[Tensor]): List of step counters.
+        initial_lr (float or None, optional): The initial learning rate used
+            to compute the ratio for decoupled weight decay. If None,
+            weight decay will not be scaled by any ratio. Default: None.
+        foreach (bool, optional): Whether to use multi-tensor APIs.
+            Defaults to None, which auto-selects.
+        capturable (bool, optional): Whether this optimizer should allow
+            graph capture. Default: False.
+        differentiable (bool, optional): Whether this function is used
+            in a context requiring differentiable optimization.
+            Default: False.
+        fused (bool, optional): Whether to use a fused version, if available.
+            Currently not implemented and will raise an error if True.
+            Default: None.
+        grad_scale (Tensor or None): Not used in the current implementation,
+            typically relevant for mixed-precision training.
+        found_inf (Tensor or None): Not used in the current implementation,
+            typically relevant for mixed-precision training.
+        has_complex (bool, optional): Indicates whether any of the parameters
+            are complex. Default: False.
+
+        beta1 (float): Coefficient for computing running averages of gradient.
+        beta2 (float): Coefficient for computing running averages of
+            squared gradient.
+        lr (float or Tensor): Learning rate.
+        clip_lambda (Callable or None): A function taking the current step
+            as input and returning a gradient clipping threshold. Defaults
+            to :func:`_default_clip_lambda` if None.
+        weight_decay (float): Weight decay coefficient.
+        decouple (bool): Whether to apply decoupled weight decay.
+        eps (float): Term added to the denominator for numerical stability.
+        maximize (bool): Whether to maximize rather than minimize.
+
+    Raises:
+        RuntimeError: If the fused implementation is requested (``fused=True``)
+            but is not supported yet, or if incompatible combinations of
+            ``lr``, ``capturable``, and ``foreach`` are passed.
+        AssertionError: If the environment does not support certain capture
+            options or if the user attempts to use multi-tensor/differentiable
+            combos that are disallowed.
+
+    Example:
+        >>> import torch
+        >>> from adopt_optimizer import adopt, _default_clip_lambda
+        >>>
+        >>> # Suppose p, grad, exp_avg, exp_avg_sq, step are Tensors
+        >>> p = torch.randn(3, requires_grad=True)
+        >>> grad = torch.randn_like(p)
+        >>> exp_avg = torch.zeros_like(p)
+        >>> exp_avg_sq = torch.zeros_like(p)
+        >>> step = torch.zeros((), dtype=torch.float)
+        >>>
+        >>> adopt(
+        ...     params=[p], grads=[grad],
+        ...     exp_avgs=[exp_avg], exp_avg_sqs=[exp_avg_sq],
+        ...     state_steps=[step],
+        ...     lr=0.001,
+        ...     beta1=0.9, beta2=0.9999,
+        ...     eps=1e-6,
+        ...     weight_decay=0.0,
+        ...     decouple=False,
+        ...     clip_lambda=_default_clip_lambda,  # optional, can be None
+        ...     maximize=False,
+        ... )
     """
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
