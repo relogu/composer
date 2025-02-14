@@ -8,7 +8,7 @@ Original code: https://github.com/iShohei220/adopt
 
 """
 
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Union, cast
 
 import torch
 from torch import Tensor
@@ -17,6 +17,7 @@ from torch.optim.optimizer import (
     ParamsT,
     _capturable_doc,
     _default_to_fused_or_foreach,
+    _device_dtype_check_for_fused,
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
@@ -29,7 +30,6 @@ from torch.optim.optimizer import (
     _view_as_real,
 )
 from torch.types import Number
-from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ['ADOPT', 'adopt']
 
@@ -94,25 +94,13 @@ class ADOPT(Optimizer):
             fused=fused,
         )
         super().__init__(params, defaults)
+        for group in self.param_groups:
+            group['initial_lr'] = group['lr']
 
         if fused:
             if differentiable:
                 raise RuntimeError('`fused` does not support `differentiable`')
             self._step_supports_amp_scaling = True
-            # TODO(crcrpar): [low prec params & their higher prec copy]
-            # Suppor AMP with FP16/BF16 model params which would need
-            # higher prec copy of params to do update math in higher prec to
-            # alleviate the loss of information.
-            fused_supported_devices = _get_fused_kernels_supported_devices()
-            if not all(
-                p.device.type in fused_supported_devices and torch.is_floating_point(p)
-                for pg in self.param_groups
-                for p in pg['params']
-            ):
-                raise RuntimeError(
-                    '`fused=True` requires all the params to be floating point Tensors of '
-                    f'supported devices: {fused_supported_devices}.',
-                )
             if foreach:
                 raise RuntimeError('`fused` and `foreach` cannot be `True` together.')
             # TODO: support fused
@@ -151,49 +139,54 @@ class ADOPT(Optimizer):
     ):
         has_complex = False
         for p in group['params']:
-            if p.grad is not None:
-                has_complex |= torch.is_complex(p)
-                params_with_grad.append(p)
-                if p.grad.is_sparse:
-                    raise RuntimeError('ADOPT does not support sparse gradients')
-                grads.append(p.grad)
+            if p.grad is None:
+                continue
+            has_complex |= torch.is_complex(p)
+            params_with_grad.append(p)
+            if p.grad.is_sparse:
+                raise RuntimeError('ADOPT does not support sparse gradients')
+            grads.append(p.grad)
 
-                state = self.state[p]
+            state = self.state[p]
 
-                # Lazy state initialization
-                if len(state) == 0:
-                    # note(crcrpar): [special device hosting for step]
-                    # Deliberately host `step` on CPU if both capturable and fused are off.
-                    # This is because kernel launches are costly on CUDA and XLA.
-                    state['step'] = (
-                        torch.zeros(
-                            (),
-                            dtype=_get_scalar_dtype(is_fused=group['fused']),
-                            device=p.device,
-                        ) if group['capturable'] or group['fused'] else torch.tensor(0.0, dtype=_get_scalar_dtype())
-                    )
-                    # Exponential moving average of gradient values
-                    state['exp_avg'] = torch.zeros_like(
-                        p,
-                        memory_format=torch.preserve_format,
-                    )
-                    # Exponential moving average of squared gradient values
-                    state['exp_avg_sq'] = torch.zeros_like(
-                        p,
-                        memory_format=torch.preserve_format,
-                    )
+            # Lazy state initialization
+            if len(state) == 0:
+                if group['fused']:
+                    _device_dtype_check_for_fused(p)
+                # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
+                # This is because kernel launches are costly on CUDA and XLA.
+                state['step'] = (
+                    torch.zeros(
+                        (),
+                        dtype=_get_scalar_dtype(is_fused=group['fused']),
+                        device=p.device,
+                    ) if group['capturable'] or group['fused'] else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                )
+                # Exponential moving average of gradient values
+                state['exp_avg'] = torch.zeros_like(
+                    p,
+                    memory_format=torch.preserve_format,
+                )
+                # Exponential moving average of squared gradient values
+                state['exp_avg_sq'] = torch.zeros_like(
+                    p,
+                    memory_format=torch.preserve_format,
+                )
+                # NOTE: We don't have anything related to AMSGrad here
 
-                exp_avgs.append(state['exp_avg'])
-                exp_avg_sqs.append(state['exp_avg_sq'])
+            exp_avgs.append(state['exp_avg'])
+            exp_avg_sqs.append(state['exp_avg_sq'])
 
-                if group['differentiable'] and state['step'].requires_grad:
-                    raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode',)
+            # NOTE: We don't have anything related to AMSGrad here
 
-                # Foreach without capturable does not support a tensor lr
-                if (group['foreach'] and torch.is_tensor(group['lr']) and not group['capturable']):
-                    raise RuntimeError('lr as a Tensor is not supported for capturable=False and foreach=True',)
+            if group['differentiable'] and state['step'].requires_grad:
+                raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode',)
 
-                state_steps.append(state['step'])
+            # Foreach without capturable does not support a tensor lr
+            if (group['foreach'] and isinstance(group['lr'], Tensor) and not group['capturable']):
+                raise RuntimeError('lr as a Tensor is not supported for capturable=False and foreach=True',)
+
+            state_steps.append(state['step'])
         return has_complex
 
     @_use_grad_for_differentiable
@@ -217,7 +210,8 @@ class ADOPT(Optimizer):
             exp_avgs: list[Tensor] = []
             exp_avg_sqs: list[Tensor] = []
             state_steps: list[Tensor] = []
-            beta1, beta2 = group['betas']
+            beta1, beta2 = cast(tuple[float, float], group['betas'])
+            # NOTE: We don't have anything related to AMSGrad here
 
             has_complex = self._init_group(
                 group,
@@ -234,6 +228,7 @@ class ADOPT(Optimizer):
                 exp_avgs,
                 exp_avg_sqs,
                 state_steps,
+                initial_lr=group['initial_lr'],
                 decouple=group['decouple'],
                 clip_lambda=self.clip_lambda,
                 beta1=beta1,
@@ -330,6 +325,7 @@ def _single_tensor_adopt(
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
     *,
+    initial_lr: Optional[float],
     decouple: bool,
     clip_lambda: Optional[Callable[[Number | Tensor | Any], float]],
     beta1: float,
@@ -357,7 +353,7 @@ def _single_tensor_adopt(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch._utils.is_compiling() and capturable:
+        if not torch._utils.is_compiling() and capturable:  # type: ignore[reportGeneralTypeIssues]
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step_t.device.type and param.device.type in capturable_supported_devices
@@ -367,6 +363,8 @@ def _single_tensor_adopt(
 
         # Perform stepweight decay if not decoupled
         if weight_decay != 0 and not decouple:
+            # NOTE: The decay factor follows the same schedule of the learning rate w/o being scaled by it
+            decay_factor = (lr / initial_lr) if initial_lr else 1.0
             grad = grad.add(param, alpha=weight_decay)
 
         if torch.is_complex(param):
@@ -375,16 +373,20 @@ def _single_tensor_adopt(
             exp_avg_sq = torch.view_as_real(exp_avg_sq)
             param = torch.view_as_real(param)
 
-        # This serves as a fake zero-th step (initialization)
+        # NOTE: During the zero-th step (when `step == 0``), the algorithm doesn't update the weights but just initializes the second momenta vectors
         if step == 0:
-            exp_avg_sq.addcmul_(grad, grad.conj())
+            # NOTE: Compared to the original implementation, we removed a useless `.conj()` call to the second `grad` in the function below
+            exp_avg_sq.addcmul_(grad, grad)
             # update step
             step_t += 1
+            # Here, we skip whatever happens below moving to the next iteration of the for loop
             continue
 
         # Perform stepweight decay if decoupled
         if weight_decay != 0 and decouple:
-            param.mul_(1 - lr * weight_decay)
+            # NOTE: The decay factor follows the same schedule of the learning rate w/o being scaled by it
+            decay_factor = (lr / initial_lr) if initial_lr else 1.0
+            param.mul_(1 - decay_factor * weight_decay)
 
         denom = torch.clamp(exp_avg_sq.sqrt(), eps)
         normed_grad = grad.div(denom)
@@ -395,7 +397,8 @@ def _single_tensor_adopt(
         exp_avg.lerp_(normed_grad, 1 - beta1)
 
         param.add_(exp_avg, alpha=-_get_value(lr))
-        exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
+        # NOTE: Compared to the original implementation, we removed a useless `.conj()` call to the second `grad` in the function below
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
         # update step
         step_t += 1
@@ -410,6 +413,7 @@ def _multi_tensor_adopt(
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
     *,
+    initial_lr: Optional[float],
     has_complex: bool,
     beta1: float,
     beta2: float,
@@ -429,7 +433,7 @@ def _multi_tensor_adopt(
         raise RuntimeError('lr as a Tensor is not supported for capturable=False and foreach=True',)
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch._utils.is_compiling() and capturable:  # type: ignore[reportGeneralTypeIssues]
         capturable_supported_devices = _get_capturable_supported_devices(supports_xla=False,)
         assert all(
             p.device.type == step.device.type and p.device.type in capturable_supported_devices
@@ -440,26 +444,21 @@ def _multi_tensor_adopt(
 
     assert grad_scale is None and found_inf is None
 
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, state_steps],)
-    # for (
-    #     device_params_,
-    #     device_grads_,
-    #     device_exp_avgs_,
-    #     device_exp_avg_sqs_,
-    #     device_state_steps_,
-    # ), _ in grouped_tensors.values():
-    #     device_params = cast(List[Tensor], device_params_)
-    #     device_grads = cast(List[Tensor], device_grads_)
-    #     device_exp_avgs = cast(List[Tensor], device_exp_avgs_)
-    #     device_exp_avg_sqs = cast(List[Tensor], device_exp_avg_sqs_)
-    #     device_state_steps = cast(List[Tensor], device_state_steps_)
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_avg_sqs, state_steps],  # type: ignore[reportArgumentType]
+    )
     for (
-        device_params,
-        device_grads,
-        device_exp_avgs,
-        device_exp_avg_sqs,
-        device_state_steps,
+        device_params_,
+        device_grads_,
+        device_exp_avgs_,
+        device_exp_avg_sqs_,
+        device_state_steps_,
     ), _ in grouped_tensors.values():
+        device_params = cast(list[Tensor], device_params_)
+        device_grads = cast(list[Tensor], device_grads_)
+        device_exp_avgs = cast(list[Tensor], device_exp_avgs_)
+        device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
+        device_state_steps = cast(list[Tensor], device_state_steps_)
 
         # Handle complex parameters
         if has_complex:
@@ -474,15 +473,18 @@ def _multi_tensor_adopt(
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
         if weight_decay != 0 and not decouple:
+            # NOTE: The decay factor follows the same schedule of the learning rate w/o being scaled by it
+            decay_factor = (lr / initial_lr) if initial_lr else 1.0
+            weight_decay_unscaled = decay_factor * weight_decay
             # Re-use the intermediate memory (device_grads) already allocated for maximize
             if maximize:
-                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+                torch._foreach_add_(device_grads, device_params, alpha=_get_value(weight_decay_unscaled))
             else:
                 device_grads = torch._foreach_add(  # type: ignore[assignment]
-                    device_grads, device_params, alpha=weight_decay,
+                    device_grads, device_params, alpha=-_get_value(weight_decay_unscaled),
                 )
 
-        # This serves as a fake zero-th step (initialization)
+        # NOTE: During the zero-th step (when `device_state_steps[0] == 0``), the algorithm doesn't update the weights but just initializes the second momenta vectors
         if device_state_steps[0] == 0:
             torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads)
 
@@ -490,7 +492,10 @@ def _multi_tensor_adopt(
             # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
             # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
             # wrapped it once now. The alpha is required to assure we go to the right overload.
-            if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+            if (
+                not torch._utils.is_compiling()  # type: ignore[reportGeneralTypeIssues]
+                and device_state_steps[0].is_cpu
+            ):
                 torch._foreach_add_(
                     device_state_steps,
                     torch.tensor(1.0, device='cpu'),
@@ -498,11 +503,14 @@ def _multi_tensor_adopt(
                 )
             else:
                 torch._foreach_add_(device_state_steps, 1)
-
+            # Here, we skip whatever happens below moving to the next iteration of the for loop
             continue
 
         if weight_decay != 0 and decouple:
-            torch._foreach_add_(device_params, device_params, alpha=-_get_value(lr) * weight_decay)
+            # NOTE: The decay factor follows the same schedule of the learning rate w/o being scaled by it
+            decay_factor = (lr / initial_lr) if initial_lr else 1.0
+            weight_decay_unscaled = decay_factor * weight_decay
+            torch._foreach_add_(device_params, device_params, alpha=-_get_value(weight_decay_unscaled))
 
         exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
         torch._foreach_maximum_(exp_avg_sq_sqrt, eps)
@@ -528,7 +536,7 @@ def _multi_tensor_adopt(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:  # type: ignore[reportGeneralTypeIssues]
             torch._foreach_add_(
                 device_state_steps,
                 torch.tensor(1.0, device='cpu'),
@@ -547,6 +555,7 @@ def _fused_adopt(
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
     *,
+    initial_lr: Optional[float],
     has_complex: bool,  # Needed for consistency.
     beta1: float,
     beta2: float,
@@ -571,6 +580,7 @@ def adopt(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+    initial_lr: Optional[float] = None,
     foreach: Optional[bool] = None,
     capturable: bool = False,
     differentiable: bool = False,
@@ -610,11 +620,6 @@ def adopt(
     if foreach is None:
         foreach = False
 
-    # this check is slow during compilation, so we skip it
-    # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
-        raise RuntimeError('API has changed, `state_steps` argument must contain a list of singleton tensors',)
-
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
     if fused and torch.jit.is_scripting():
@@ -633,17 +638,18 @@ def adopt(
         exp_avgs,
         exp_avg_sqs,
         state_steps,
-        has_complex=has_complex,
+        initial_lr=initial_lr,
+        decouple=decouple,
+        clip_lambda=clip_lambda,
         beta1=beta1,
         beta2=beta2,
         lr=lr,
-        clip_lambda=clip_lambda,
         weight_decay=weight_decay,
-        decouple=decouple,
         eps=eps,
         maximize=maximize,
         capturable=capturable,
         differentiable=differentiable,
         grad_scale=grad_scale,
         found_inf=found_inf,
+        has_complex=has_complex,
     )
