@@ -154,50 +154,58 @@ class NoiseScaleMonitor(Callback):
         assert b_big > 0, 'The batch size must be greater than 0'
         b_small = state.device_train_microbatch_size
 
-        # Estimate the trace of the covariance matrix of the gradients
-        trace_estimate = (self.g_small_l2norm_squared.item() - g_big_l2norm_squared.item()) / ((1 / b_small) -
-                                                                                               (1 / b_big))
-        # Estimate the squared norm of the gradients
-        squared_gradients_estimate = (
-            b_big * g_big_l2norm_squared.item() - b_small * self.g_small_l2norm_squared.item()
-        ) / (b_big - b_small)
+        if b_small == b_big:
+            if self.counter == 1:
+                warnings.warn(
+                    'NoiseScaleMonitor assumes that the configured batch size is divided into microbatches. If the small and big batch sizes are equal, thish means that no microbatching is being used. The noise scale cannot be computed.',
+                    category=UserWarning,
+                )
+        else:
 
-        # Compute exponential moving averages
-        self.running_trace_estimate, scale = ema_with_debias(
-            self.running_trace_estimate,
-            self.beta,
-            trace_estimate,
-            self.counter,
-        )
-        self.running_squared_gradients_estimate, noise = ema_with_debias(
-            self.running_squared_gradients_estimate,
-            self.beta,
-            squared_gradients_estimate,
-            self.counter,
-        )
-        self.running_noise_scale, noise_scale_ema_bias = ema_with_debias(
-            self.running_noise_scale,
-            self.beta,
-            trace_estimate / squared_gradients_estimate,
-            self.counter,
-        )
-        # Compute the noise scale
-        noise_scale_with_emas = scale / noise
-        noise_scale = trace_estimate / squared_gradients_estimate
+            # Estimate the trace of the covariance matrix of the gradients
+            trace_estimate = (self.g_small_l2norm_squared.item() - g_big_l2norm_squared.item()) / ((1 / b_small) -
+                                                                                                   (1 / b_big))
+            # Estimate the squared norm of the gradients
+            squared_gradients_estimate = (
+                b_big * g_big_l2norm_squared.item() - b_small * self.g_small_l2norm_squared.item()
+            ) / (b_big - b_small)
 
-        # Log the current value of the noise scale
-        logger.log_metrics({
-            'noise_scale/b_small': b_small,
-            'noise_scale/b_big': b_big,
-            'noise_scale/g_small_l2norm_squared': self.g_small_l2norm_squared.item(),
-            'noise_scale/g_big_l2norm_squared': g_big_l2norm_squared.item(),
-            'noise_scale/trace_estimate': trace_estimate,
-            'noise_scale/squared_gradients_estimate': squared_gradients_estimate,
-            'noise_scale/noise_scale_with_emas': noise_scale_with_emas,
-            'noise_scale/noise_scale_ema': self.running_noise_scale,
-            'noise_scale/noise_scale_ema_bias': noise_scale_ema_bias,
-            'noise_scale/noise_scale_raw': noise_scale,
-        },)
+            # Compute exponential moving averages
+            self.running_trace_estimate, scale = ema_with_debias(
+                self.running_trace_estimate,
+                self.beta,
+                trace_estimate,
+                self.counter,
+            )
+            self.running_squared_gradients_estimate, noise = ema_with_debias(
+                self.running_squared_gradients_estimate,
+                self.beta,
+                squared_gradients_estimate,
+                self.counter,
+            )
+            self.running_noise_scale, noise_scale_ema_bias = ema_with_debias(
+                self.running_noise_scale,
+                self.beta,
+                trace_estimate / squared_gradients_estimate,
+                self.counter,
+            )
+            # Compute the noise scale
+            noise_scale_with_emas = scale / noise
+            noise_scale = trace_estimate / squared_gradients_estimate
+
+            # Log the current value of the noise scale
+            logger.log_metrics({
+                'noise_scale/b_small': b_small,
+                'noise_scale/b_big': b_big,
+                'noise_scale/g_small_l2norm_squared': self.g_small_l2norm_squared.item(),
+                'noise_scale/g_big_l2norm_squared': g_big_l2norm_squared.item(),
+                'noise_scale/trace_estimate': trace_estimate,
+                'noise_scale/squared_gradients_estimate': squared_gradients_estimate,
+                'noise_scale/noise_scale_with_emas': noise_scale_with_emas,
+                'noise_scale/noise_scale_ema': self.running_noise_scale,
+                'noise_scale/noise_scale_ema_bias': noise_scale_ema_bias,
+                'noise_scale/noise_scale_raw': noise_scale,
+            },)
 
         # Reset the store of gradients accumulated
         self.last_gradients_store.clear()
