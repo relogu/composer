@@ -16,6 +16,7 @@ subclass suitable for direct usage, and the low-level functional API
 instantiate the :class:`ADOPT` class.
 """
 
+import math
 from typing import Any, Callable, Optional, Union, cast
 
 import torch
@@ -38,6 +39,8 @@ from torch.optim.optimizer import (
     _view_as_real,
 )
 from torch.types import Number
+
+from composer.utils import dist
 
 __all__ = ['ADOPT', 'adopt']
 
@@ -147,6 +150,13 @@ class ADOPT(Optimizer):
         ``lr`` as a ``Tensor`` with ``foreach=True`` and
         ``capturable=False`` will raise an error.
     """
+
+    metric_functions = {
+        'l2_norm/moment': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg']),
+        'l2_norm/param': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(param.data),
+        'l2_norm/update': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(step_tensor),
+        'l2_norm/grad': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(param.grad),
+    }
 
     def __init__(
         self,
@@ -384,8 +394,64 @@ class ADOPT(Optimizer):
 
         return loss
 
+    def dist_reduce_metrics(self, optimizer_metrics):
+        local_keys = list(optimizer_metrics.keys())
+        all_gathered_keys = dist.all_gather_object(local_keys)
+        all_keys = set()
+        for keys in all_gathered_keys:
+            all_keys.update(keys)
 
-# TODO: Fix it
+        # Sort keys to ensure every rank has the same keys order
+        # Only L2 norm metric keys are present, can apply regular sort
+        all_keys = sorted(all_keys)
+        for metric in all_keys:
+            if metric.startswith('l2_norm'):
+                reduced = optimizer_metrics.get(metric, torch.tensor(0.0, device=torch.cuda.current_device()))
+                if dist.get_world_size() > 1:
+                    dist.all_reduce(reduced, reduce_operation='SUM')
+
+                optimizer_metrics[metric] = math.sqrt(reduced)
+            else:
+                reduced = optimizer_metrics.get(metric, torch.tensor(0.0, device=torch.cuda.current_device()))
+                if dist.get_world_size() > 1:
+                    dist.all_reduce(reduced, reduce_operation='SUM')
+                optimizer_metrics[metric] = reduced / dist.get_world_size()
+
+        return optimizer_metrics
+
+    def pre_reduce_metrics(self, optimizer_metrics):
+        """Preprocess metrics to reduce across ranks correctly."""
+        # Only L2 norm metric keys are present, can skip sorting at this stage
+        for metric in optimizer_metrics:
+            # L2 norms need to be squared, before they are reduced via summation
+            optimizer_metrics[metric] = optimizer_metrics[metric]**2
+
+        return optimizer_metrics
+
+    def report_per_parameter_metrics(self, param: torch.Tensor, name: str, optimizer_metrics: dict):
+        lr = self.param_groups[0]['lr']
+        weight_decay = self.param_groups[0]['weight_decay']
+        initial_lr = self.param_groups[0]['initial_lr']
+        decouple = self.param_groups[0]['decouple']
+
+        if param in self.state:
+            param_optim_state = self.state[param]
+            # NOTE: This is inverting the ADOPT update to recover the step tensor
+            step_tensor = lr * param_optim_state['exp_avg']
+            if weight_decay != 0 and decouple:
+                decay_factor = (lr / initial_lr) if initial_lr else 1.0
+                scaling_factor = (decay_factor * weight_decay) / (1 - decay_factor * weight_decay)
+                step_tensor.mul_(1 + scaling_factor).add_(param, alpha=scaling_factor)
+            for metric in self.metric_functions:
+                optimizer_metrics[f'{metric}/{name}'] = self.metric_functions[metric](
+                    param,
+                    param_optim_state,
+                    step_tensor,
+                )
+
+        return optimizer_metrics
+
+
 ADOPT.__doc__ = (
     r"""Implements ADOPT algorithm.
 
