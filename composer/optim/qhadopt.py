@@ -360,7 +360,7 @@ class QHADOPT(Optimizer):
             exp_avgs: list[Tensor] = []
             exp_avg_sqs: list[Tensor] = []
             state_steps: list[Tensor] = []
-            v1, _ = cast(tuple[float, ...], group['vs'])
+            v1, *_ = cast(tuple[float, ...], group['vs'])
             beta1, beta2 = cast(tuple[float, float], group['betas'])
             # NOTE: We don't have anything related to AMSGrad here
 
