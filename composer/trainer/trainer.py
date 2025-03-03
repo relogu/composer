@@ -49,6 +49,8 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader, DistributedSampler
 from torchmetrics import Metric
 
+from composer.optim.scheduler import LRSchedulerWithState
+
 if version.parse(torch.__version__) >= version.parse('2.3.0'):
     from torch.amp.grad_scaler import GradScaler, _refresh_per_optimizer_state  # type: ignore
 else:
@@ -202,7 +204,11 @@ def _compile_schedulers(
 ) -> list[LRScheduler]:
     compiled_schedulers = []
     for scheduler in ensure_tuple(schedulers):
-        if isinstance(scheduler, LRScheduler):
+        if isinstance(scheduler, LRSchedulerWithState):  # type: ignore
+            # NonFunctionalComposerScheduler is a no-op scheduler
+            scheduler.compile(weakref.proxy(state))
+            compiled_schedulers.append(scheduler)
+        elif isinstance(scheduler, LRScheduler):
             scale_pytorch_scheduler(scheduler, scale_schedule_ratio)
             compiled_schedulers.append(scheduler)
         # It's a composer scheduler

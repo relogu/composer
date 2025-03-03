@@ -28,10 +28,12 @@ from composer.optim.scheduler import (
     ExponentialScheduler,
     LinearScheduler,
     LinearWithWarmupScheduler,
+    LRSchedulerWithState,
     MultiStepScheduler,
     MultiStepWithWarmupScheduler,
     PolynomialScheduler,
     PolynomialWithWarmupScheduler,
+    QuasiHyperbolicScheduler,
     StepScheduler,
     compile_composer_scheduler,
 )
@@ -39,6 +41,8 @@ from composer.optim.scheduler import (
 __all__ = [
     'ADOPT',
     'QHADOPT',
+    'LRSchedulerWithState',
+    'QuasiHyperbolicScheduler',
     'DecoupledAdamW',
     'DecoupledSGDW',
     'ComposerScheduler',

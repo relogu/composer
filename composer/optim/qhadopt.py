@@ -96,8 +96,8 @@ class QHADOPT(Optimizer):
         betas (Tuple[float, float], optional): Coefficients used for
             computing running averages of gradient and its square
             (default: (0.9, 0.9999)).
-        vs (Tuple[float, ...], optional): Coefficients used for computing
-            quasi-hyperbolic updates (default: (0.9,)).
+        vs (Tuple[float, float], optional): Coefficients used for computing
+            quasi-hyperbolic updates (default: (1.0,1.0)).
         eps (float, optional): Term added to the denominator to improve
             numerical stability (default: 1e-6).
         clip_lambda (callable, optional): A function that, given the current
@@ -164,8 +164,8 @@ class QHADOPT(Optimizer):
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
-        betas: tuple[float, float] = (0.9999, 0.9999),
-        vs: tuple[float, ...] = (0.9,),
+        betas: tuple[float, float] = (0.999, 0.9999),
+        vs: tuple[float, float] = (0.7, 1.0),
         eps: float = 1e-6,
         clip_lambda: Optional[Callable[[Number | Tensor | Any], float]] = _default_clip_lambda,
         weight_decay: float = 0.0,
@@ -360,7 +360,7 @@ class QHADOPT(Optimizer):
             exp_avgs: list[Tensor] = []
             exp_avg_sqs: list[Tensor] = []
             state_steps: list[Tensor] = []
-            v1, *_ = cast(tuple[float, ...], group['vs'])
+            v1, _v2 = cast(tuple[float, float], group['vs'])
             beta1, beta2 = cast(tuple[float, float], group['betas'])
             # NOTE: We don't have anything related to AMSGrad here
 

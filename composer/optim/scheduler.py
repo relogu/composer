@@ -16,7 +16,7 @@ import logging
 import math
 import textwrap
 import warnings
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, Union
 
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 
@@ -48,6 +48,8 @@ __all__ = [
     'ConstantWithLinearCooldownWithWarmupScheduler',
     'ConstantWithSqrtCooldownWithWarmupScheduler',
     'PolynomialWithWarmupScheduler',
+    'LRSchedulerWithState',
+    'QuasiHyperbolicScheduler',
 ]
 
 
@@ -1180,3 +1182,146 @@ class PolynomialWithWarmupScheduler(ComposerScheduler):
         coeff = (1 - frac_of_total)**self.power
         current_factor = self.alpha_f + coeff * (1.0 - self.alpha_f)
         return current_factor
+
+
+class LRSchedulerWithState(LRScheduler, ComposerScheduler):
+    r"""Base class for schedulers that do not modify the learning rate.
+
+    This class wraps a PyTorch LRScheduler so that it can be compiled from a Composer State.
+    """
+
+    def __init__(self):
+        # Defer optimizer initialization until compile() is called.
+        pass
+
+    def compile(self, state: Any, last_epoch: int = -1) -> None:
+        optimizers = state.optimizers
+        if len(optimizers) != 1:
+            raise NotImplementedError('Functional schedulers with multiple optimizers are unsupported.')
+        optimizer = optimizers[0]
+        self.state = state  # type: ignore[reportUninitializedInstanceVariable]
+        super().__init__(optimizer=optimizer, last_epoch=last_epoch)
+
+
+class QuasiHyperbolicScheduler(LRSchedulerWithState):
+    r"""Adjusts the quasi-hyperbolic parameters (v₁ scaling and β₁) for optimization.
+
+    This scheduler updates:
+      - The v₁ scaling factor for each parameter group is computed via a linear schedule from
+        a starting scaling factor (`v1_scaling_start`) to a target scaling factor (`v1_scaling_end`)
+        over a duration `t_v1`. The effective v₁ is:
+
+            effective_v1 = base_vs[i] * (v1_scaling_start + (v1_scaling_end - v1_scaling_start)
+                                         * min(t, t_v1_value) / t_v1_value)
+
+        where t is the current time obtained from the Composer state.
+      - The β₁ parameter is updated via a nonlinear schedule from its base value to `b1_end`
+        over a duration `t_b1`.
+
+    The scheduler does not modify the learning rate. It only updates additional optimizer parameters
+    stored in each parameter group:
+      - `group["vs"]`: a tuple whose first element is the current v₁.
+      - `group["betas"]`: a tuple whose first element is the current β₁.
+
+    The durations `t_v1` and `t_b1` may be specified as a string or Time object.
+    """
+
+    def __init__(
+        self,
+        v1_scaling_start: float = 1.0,  # Starting scaling factor for v₁.
+        v1_scaling_end: float = 0.7,  # Target scaling factor for v₁.
+        b1_end: float = 0.999,  # Target β₁.
+        t_v1: Union[str, Time] = '1dur',  # Duration for v₁ scaling (str or Time).
+        t_b1: Union[str, Time] = '1dur',  # Duration for β₁ scheduling (str or Time).
+    ):
+        # Save scheduler parameters.
+        self.v1_scaling_start = v1_scaling_start
+        self.v1_scaling_end = v1_scaling_end
+        self.b1_end = b1_end
+        self.t_v1 = t_v1
+        self.t_b1 = t_b1
+
+        # The base values for v₁ and β₁ will be set in compile() after the optimizer is available.
+        self.base_vs = []
+        self.base_beta1s = []
+        self._step_count = 0
+
+    def compile(self, state: Any, last_epoch: int = -1) -> None:
+        super().compile(state, last_epoch)
+        # Save the base (initial) v₁ and β₁ values from each parameter group.
+        self.base_vs = [group['vs'][0] for group in self.optimizer.param_groups]
+        self.base_beta1s = [group['betas'][0] for group in self.optimizer.param_groups]
+
+    def get_v1(self, t: float, i: int, t_v1_value: float) -> float:
+        """Compute the new v₁ for parameter group i at time t.
+
+        Uses a linear schedule from v1_scaling_start to v1_scaling_end.
+        The effective v₁ is computed as:
+            new_v1 = base_vs[i] * (v1_scaling_start + (v1_scaling_end - v1_scaling_start) * min(t, t_v1_value) / t_v1_value)
+        """
+        factor = self.v1_scaling_start + (self.v1_scaling_end - self.v1_scaling_start) * min(t, t_v1_value) / t_v1_value
+        return self.base_vs[i] * factor
+
+    def get_beta1(self, t: float, i: int, t_b1_value: float) -> float:
+        """Compute the new β₁ for parameter group i at time t.
+
+        Using a nonlinear schedule.
+        """
+        beta_start = self.base_beta1s[i]
+        if t_b1_value > 0 and t < t_b1_value:
+            fraction = t / t_b1_value
+            denom = (1 - fraction) * math.log(self.b1_end) + fraction * math.log(beta_start)
+            if denom == 0:
+                new_beta1_candidate = beta_start
+            else:
+                new_beta1_candidate = math.exp((math.log(beta_start) * math.log(self.b1_end)) / denom)
+            return min(new_beta1_candidate, self.b1_end)
+        else:
+            return self.b1_end
+
+    def step(self, epoch: int | None = None):
+        """Update the quasi-hyperbolic parameters (v₁ scaling and β₁) for each optimizer parameter group.
+
+        This method should be called after `optimizer.step()`.
+        The current time is computed from the Composer state's timestamp using the unit from the converted t_v1.
+        """
+        if self._step_count == 1:
+            if not hasattr(self.optimizer.step, '_wrapped_by_lr_sched'):
+                warnings.warn(
+                    'It appears that `optimizer.step()` has been overridden. '
+                    'Ensure to call `optimizer.step()` before `lr_scheduler.step()`.',
+                    UserWarning,
+                )
+            elif not getattr(self.optimizer, '_opt_called', False):
+                warnings.warn(
+                    'Detected call of `lr_scheduler.step()` before `optimizer.step()`. '
+                    'Call `optimizer.step()` before `lr_scheduler.step()`.',
+                    UserWarning,
+                )
+        assert self.state.max_duration is not None, 'max_duration should be set whenever schedulers are invoked'
+
+        self._step_count += 1
+
+        # Update epoch.
+        if epoch is None:
+            self.last_epoch += 1
+        else:
+            warnings.warn('Passing epoch to step() is deprecated', UserWarning)
+            self.last_epoch = epoch
+
+        # Convert the t_v1 and t_b1 durations using Composer's _convert_time.
+        converted_t_v1 = _convert_time(self.t_v1, self.state)
+        converted_t_b1 = _convert_time(self.t_b1, self.state)
+        t_v1_value = float(converted_t_v1.value)
+        t_b1_value = float(converted_t_b1.value)
+
+        # Compute current time from state.timestamp using the unit from converted_t_v1.
+        current_time = self.state.timestamp.get(converted_t_v1.unit)
+        t = float(current_time.value)
+
+        # Update each parameter group's quasi-hyperbolic parameters.
+        for i, group in enumerate(self.optimizer.param_groups):
+            new_v1 = self.get_v1(t, i, t_v1_value)
+            new_beta1 = self.get_beta1(t, i, t_b1_value)
+            group['vs'] = (new_v1, group['vs'][1])
+            group['betas'] = (new_beta1, group['betas'][1])
