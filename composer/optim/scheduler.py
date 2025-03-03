@@ -11,18 +11,18 @@ be configured using arbitrary but explicit time units.
 See :class:`~.ComposerScheduler` for more information on stateless schedulers.
 """
 
-from collections.abc import Callable
 import inspect
 import logging
 import math
 import textwrap
 import types
 import warnings
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Union
 
-from torch.optim.lr_scheduler import LambdaLR, LRScheduler
-from torch.optim import Optimizer
 from torch import Tensor
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 
 from composer.core import State, Time, TimeUnit
 
@@ -143,7 +143,6 @@ class ComposerScheduler(Protocol):
             alpha (float): A multiplier to apply to the optimizer's provided learning rate.
         """
         raise NotImplementedError
-    
 
 
 class ComposerSchedulerForGroups(Protocol):
@@ -1250,7 +1249,8 @@ class PolynomialWithWarmupScheduler(ComposerScheduler):
         coeff = (1 - frac_of_total)**self.power
         current_factor = self.alpha_f + coeff * (1.0 - self.alpha_f)
         return current_factor
-    
+
+
 class LRSchedulerState(LRScheduler):
     r"""Base class for schedulers that update optimizer parameter groups.
 
@@ -1259,23 +1259,23 @@ class LRSchedulerState(LRScheduler):
     parameter group—with keys corresponding to parameters to update (for example, "vs", "betas").
     """
     _get_lr_called_within_step: bool = False
-    
+
     def get_group_params(self) -> list[dict[str, Any]]:
-        raise NotImplementedError("Subclasses must implement get_group_params().")
+        raise NotImplementedError('Subclasses must implement get_group_params().')
 
     def step(self, epoch: int | None = None):
         # Warn if optimizer.step() not called before scheduler.step() (per PyTorch conventions)
         if self._step_count == 1:
-            if not hasattr(self.optimizer.step, "_wrapped_by_lr_sched"):
+            if not hasattr(self.optimizer.step, '_wrapped_by_lr_sched'):
                 warnings.warn(
-                    "It appears that `optimizer.step()` has been overridden. "
-                    "Ensure to call `optimizer.step()` before `lr_scheduler.step()`.",
+                    'It appears that `optimizer.step()` has been overridden. '
+                    'Ensure to call `optimizer.step()` before `lr_scheduler.step()`.',
                     UserWarning,
                 )
-            elif not getattr(self.optimizer, "_opt_called", False):
+            elif not getattr(self.optimizer, '_opt_called', False):
                 warnings.warn(
-                    "Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
-                    "Call `optimizer.step()` before `lr_scheduler.step()`.",
+                    'Detected call of `lr_scheduler.step()` before `optimizer.step()`. '
+                    'Call `optimizer.step()` before `lr_scheduler.step()`.',
                     UserWarning,
                 )
         self._step_count += 1
@@ -1287,7 +1287,7 @@ class LRSchedulerState(LRScheduler):
                 self.last_epoch += 1
                 new_params = self.get_group_params()
             else:
-                warnings.warn("Passing epoch to step() is deprecated", UserWarning)
+                warnings.warn('Passing epoch to step() is deprecated', UserWarning)
                 self.last_epoch = epoch
                 new_params = self.get_group_params()
 
@@ -1300,19 +1300,21 @@ class LRSchedulerState(LRScheduler):
                     group[key] = value
 
         # For compatibility, update _last_lr based on group["lr"]
-        self._last_lr: list[float] = [group["lr"] for group in self.optimizer.param_groups]
+        self._last_lr: list[float] = [group['lr'] for group in self.optimizer.param_groups]
 
 
 class LambdaSchedulerState(LRScheduler):
     r"""A PyTorch scheduler that sets optimizer group parameters based on a provided function.
-    
+
     The function should compute and return a list of dictionaries, one per parameter group,
     containing key-value pairs to update.
     """
+
     def __init__(
         self,
         optimizer: Optimizer,
-        group_fn_in: Callable[[int], list[dict[str, Any]]] | list[Callable[[int], dict[str, Any]]] | tuple[Callable[[int], dict[str, Any]]],
+        group_fn_in: Callable[[int], list[dict[str, Any]]] | list[Callable[[int], dict[str, Any]]] |
+        tuple[Callable[[int], dict[str, Any]]],
         last_epoch: int = -1,
     ):
         self.optimizer = optimizer
@@ -1321,24 +1323,22 @@ class LambdaSchedulerState(LRScheduler):
             self.group_fn = [group_fn_in] * len(optimizer.param_groups)
         else:
             if len(group_fn_in) != len(optimizer.param_groups):
-                raise ValueError(f"Expected {len(optimizer.param_groups)} functions, got {len(group_fn_in)}")
+                raise ValueError(f'Expected {len(optimizer.param_groups)} functions, got {len(group_fn_in)}')
             self.group_fn = list(group_fn_in)
         super().__init__(optimizer, last_epoch)
 
     def state_dict(self):
-        state_dict = {
-            key: value for key, value in self.__dict__.items() if key not in ("optimizer", "group_fn")
-        }
-        state_dict["group_fn"] = [None] * len(self.group_fn)
+        state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'group_fn')}
+        state_dict['group_fn'] = [None] * len(self.group_fn)
         for idx, fn in enumerate(self.group_fn):
             if not isinstance(fn, types.FunctionType):
-                state_dict["group_fn"][idx] = fn.__dict__.copy() # type: ignore[reportArgumentType]
+                state_dict['group_fn'][idx] = fn.__dict__.copy()  # type: ignore[reportArgumentType]
         return state_dict
 
     def load_state_dict(self, state_dict):
-        lr_lambdas: list[dict[str, Any] | None] = state_dict.pop("group_fn")
+        lr_lambdas: list[dict[str, Any] | None] = state_dict.pop('group_fn')
         self.__dict__.update(state_dict)
-        state_dict["group_fn"] = lr_lambdas
+        state_dict['group_fn'] = lr_lambdas
         for idx, fn in enumerate(lr_lambdas):
             if fn is not None:
                 self.group_fn[idx].__dict__.update(fn)
@@ -1349,7 +1349,9 @@ class LambdaSchedulerState(LRScheduler):
         else:
             self.last_epoch = epoch
 
-        new_group_params_list: list[dict[str, Any]] = [fn(self.last_epoch) for fn in self.group_fn] # type: ignore[reportAssignmentType]
+        new_group_params_list: list[dict[str, Any]] = [
+            fn(self.last_epoch) for fn in self.group_fn
+        ]  # type: ignore[reportAssignmentType]
         # new_group_params_list is expected to be a list of dicts.
         for group, new_params in zip(self.optimizer.param_groups, new_group_params_list):
             for key, value in new_params.items():
@@ -1357,6 +1359,8 @@ class LambdaSchedulerState(LRScheduler):
                     group[key].fill_(value)
                 else:
                     group[key] = value
+
+
 class QuasiHyperbolicScheduler(ComposerSchedulerForGroups):
     r"""Functional quasi-hyperbolic scheduler.
 
@@ -1368,13 +1372,14 @@ class QuasiHyperbolicScheduler(ComposerSchedulerForGroups):
     The durations t_v1 and t_b1 may be specified as a string or Time object and are converted via _convert_time.
     This class is entirely stateless; it does not cache any base values.
     """
+
     def __init__(
         self,
         v1_scaling_start: float = 1.0,
         v1_scaling_end: float = 0.7,
         b1_end: float = 0.999,
-        t_v1: Union[str, Any] = "1dur",
-        t_b1: Union[str, Any] = "1dur",
+        t_v1: Union[str, Any] = '1dur',
+        t_b1: Union[str, Any] = '1dur',
         *,
         linear_b1: bool = False,
     ):
@@ -1407,27 +1412,27 @@ class QuasiHyperbolicScheduler(ComposerSchedulerForGroups):
     def __call__(self, state: Any, ssr: float = 1.0) -> list[dict[str, float]]:
         # Extract current base values directly from the optimizer parameter groups.
         groups = state.optimizers[0].param_groups
-        
+
         # Convert durations using Composer's _convert_time.
         converted_t_v1 = _convert_time(self.t_v1, state)
         converted_t_b1 = _convert_time(self.t_b1, state)
         t_v1_value = float(converted_t_v1.value)
         t_b1_value = float(converted_t_b1.value)
-        
+
         # Get current time from state.timestamp using the unit of t_v1.
         current_time = state.timestamp.get(converted_t_v1.unit)
         t = float(current_time.value)
-        
+
         new_params = []
         for group in groups:
             # Extract the current (base) v₁ and β₁ for this group.
-            base_v = group["vs"][0]
-            base_beta = group["betas"][0]
+            base_v = group['vs'][0]
+            base_beta = group['betas'][0]
             new_v1 = self.get_v1(t, base_v, t_v1_value)
             new_beta1 = self.get_beta1(t, base_beta, t_b1_value)
-            new_params.append({"vs": new_v1, "betas": new_beta1})
+            new_params.append({'vs': new_v1, 'betas': new_beta1})
         return new_params
-    
+
 
 def compile_composer_stateful_scheduler(scheduler: ComposerSchedulerForGroups, state: State) -> LRScheduler:
     """Converts a stateless scheduler into a PyTorch scheduler object.

@@ -49,7 +49,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader, DistributedSampler
 from torchmetrics import Metric
 
-from composer.optim.scheduler import ComposerSchedulerForGroups, LRSchedulerState, compile_composer_stateful_scheduler
+from composer.optim.scheduler import ComposerSchedulerForGroups, compile_composer_stateful_scheduler
 
 if version.parse(torch.__version__) >= version.parse('2.3.0'):
     from torch.amp.grad_scaler import GradScaler, _refresh_per_optimizer_state  # type: ignore
@@ -1070,11 +1070,11 @@ class Trainer:
         # Optimizers and Scheduling
         optimizers: Optional[torch.optim.Optimizer] = None,
         needle: Optional[Union[ComposerScheduler,
-                                   LRScheduler,
-                                   Sequence[Union[ComposerScheduler,
-                                                  LRScheduler,
-                                                 ]],
-                                  ]] = None,
+                               LRScheduler,
+                               Sequence[Union[ComposerScheduler,
+                                              LRScheduler,
+                                             ]],
+                              ]] = None,
         scale_schedule_ratio: float = 1.0,
         step_schedulers_every_batch: Optional[bool] = None,
 
