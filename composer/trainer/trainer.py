@@ -49,7 +49,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader, DistributedSampler
 from torchmetrics import Metric
 
-from composer.optim.scheduler import LRSchedulerWithState
+from composer.optim.scheduler import ComposerSchedulerForGroups, LRSchedulerState, compile_composer_stateful_scheduler
 
 if version.parse(torch.__version__) >= version.parse('2.3.0'):
     from torch.amp.grad_scaler import GradScaler, _refresh_per_optimizer_state  # type: ignore
@@ -204,10 +204,15 @@ def _compile_schedulers(
 ) -> list[LRScheduler]:
     compiled_schedulers = []
     for scheduler in ensure_tuple(schedulers):
-        if isinstance(scheduler, LRSchedulerWithState):  # type: ignore
-            # NonFunctionalComposerScheduler is a no-op scheduler
-            scheduler.compile(weakref.proxy(state))
-            compiled_schedulers.append(scheduler)
+        if isinstance(scheduler, ComposerSchedulerForGroups):  # type: ignore
+            compiled_schedulers.append(
+                compile_composer_stateful_scheduler(
+                    scheduler,
+                    # NOTE: Passing a weakref to avoid circular reference
+                    weakref.proxy(state),
+                    # state,
+                ),
+            )
         elif isinstance(scheduler, LRScheduler):
             scale_pytorch_scheduler(scheduler, scale_schedule_ratio)
             compiled_schedulers.append(scheduler)
@@ -1064,7 +1069,7 @@ class Trainer:
 
         # Optimizers and Scheduling
         optimizers: Optional[torch.optim.Optimizer] = None,
-        schedulers: Optional[Union[ComposerScheduler,
+        needle: Optional[Union[ComposerScheduler,
                                    LRScheduler,
                                    Sequence[Union[ComposerScheduler,
                                                   LRScheduler,
@@ -1615,14 +1620,14 @@ class Trainer:
         self.logger.log_hyperparameters({'rank_zero_seed': rank_zero_seed})
 
         # Schedulers
-        self.state.schedulers = _compile_schedulers(schedulers, self.state, scale_schedule_ratio)
+        self.state.schedulers = _compile_schedulers(needle, self.state, scale_schedule_ratio)
         if scale_schedule_ratio != 1.0:
             if len(self.state.schedulers) == 0:
                 raise ValueError('Specifying `scale_schedule_ratio` without `schedulers` has no effect.')
             self.state.max_duration = _scale_max_duration_by_ssr(scale_schedule_ratio, self.state.max_duration)
 
         if step_schedulers_every_batch is None:
-            self._scheduler_step_frequency = _get_default_scheduler_frequency(schedulers)
+            self._scheduler_step_frequency = _get_default_scheduler_frequency(needle)
         else:
             self._scheduler_step_frequency = TimeUnit.BATCH if step_schedulers_every_batch else TimeUnit.EPOCH
 

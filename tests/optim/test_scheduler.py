@@ -350,7 +350,7 @@ def test_scheduler_trains(
             max_duration='2ep',
             train_subset_num_batches=5,
             scale_schedule_ratio=ssr,
-            schedulers=scheduler,
+            needle=scheduler,
             seed=rank_zero_seed,
         )
         trainer.fit()

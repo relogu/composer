@@ -28,7 +28,7 @@ from composer.optim.scheduler import (
     ExponentialScheduler,
     LinearScheduler,
     LinearWithWarmupScheduler,
-    LRSchedulerWithState,
+    LRSchedulerState,
     MultiStepScheduler,
     MultiStepWithWarmupScheduler,
     PolynomialScheduler,
@@ -41,7 +41,7 @@ from composer.optim.scheduler import (
 __all__ = [
     'ADOPT',
     'QHADOPT',
-    'LRSchedulerWithState',
+    'LRSchedulerState',
     'QuasiHyperbolicScheduler',
     'DecoupledAdamW',
     'DecoupledSGDW',

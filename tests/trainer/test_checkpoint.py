@@ -804,7 +804,7 @@ class TestCheckpointLoading:
             save_filename='ep{epoch}' + file_extension,
             max_duration=max_duration,
             optimizers=optimizer,
-            schedulers=ExponentialScheduler(gamma=0.9),
+            needle=ExponentialScheduler(gamma=0.9),
             callbacks=callbacks,
             **kwargs,
         )
@@ -1529,7 +1529,7 @@ class TestCheckpointResumption:
             train_subset_num_batches=train_subset_num_batches,
             max_duration=max_duration,
             optimizers=optimizer,
-            schedulers=ExponentialScheduler(gamma=0.9),
+            needle=ExponentialScheduler(gamma=0.9),
             callbacks=[DummyStatefulCallback()],
             **kwargs,
         )
