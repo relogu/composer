@@ -17,7 +17,7 @@ import math
 import textwrap
 import warnings
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, Union, cast
 
 from torch import Tensor
 from torch.optim import Optimizer
@@ -1413,11 +1413,11 @@ class QuasiHyperbolicScheduler(ComposerSchedulerForGroups, ComposerScheduler):
         new_params = []
         for group in groups:
             # Extract the current (base) v₁ and β₁ for this group.
-            base_v = group['vs'][0]
-            base_beta = group['betas'][0]
+            base_v, base_v2 = cast(tuple[float,float], group['vs'])
+            base_beta, base_beta2 = cast(tuple[float,float], group['betas'])
             new_v1 = self.get_v1(t, base_v, t_v1_value)
             new_beta1 = self.get_beta1(t, base_beta, t_b1_value)
-            new_params.append({'vs': new_v1, 'betas': new_beta1})
+            new_params.append({'vs': (new_v1,base_v2), 'betas': (new_beta1,base_beta2)})
         return new_params
 
 
