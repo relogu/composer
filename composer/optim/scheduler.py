@@ -1361,7 +1361,7 @@ class LambdaSchedulerState(LRScheduler):
                     group[key] = value
 
 
-class QuasiHyperbolicScheduler(ComposerSchedulerForGroups):
+class QuasiHyperbolicScheduler(ComposerSchedulerForGroups, ComposerScheduler):
     r"""Functional quasi-hyperbolic scheduler.
 
     This scheduler computes updated parameters for each optimizer parameter group.
