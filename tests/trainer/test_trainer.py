@@ -486,7 +486,7 @@ class TestTrainerInitOrFit:
             model=model,
             max_duration=max_duration,
             train_dataloader=train_dataloader,
-            needle=scheduler,
+            schedulers=scheduler,
             scale_schedule_ratio=scale_schedule_ratio,
             step_schedulers_every_batch=step_schedulers_every_batch,
         )

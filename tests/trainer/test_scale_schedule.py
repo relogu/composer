@@ -109,7 +109,7 @@ class TestScaleScheduleTrainer():
             model=model,
             optimizers=optimizers,
             train_dataloader=DataLoader(RandomClassificationDataset()),
-            needle=[MultiStepScheduler(milestones=['30ba', '50ba'], gamma=0.1)],
+            schedulers=[MultiStepScheduler(milestones=['30ba', '50ba'], gamma=0.1)],
             scale_schedule_ratio=ssr,
             callbacks=[CheckScaleSchedule(ssr)],
             max_duration='10ep',

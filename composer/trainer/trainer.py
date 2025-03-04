@@ -1069,7 +1069,7 @@ class Trainer:
 
         # Optimizers and Scheduling
         optimizers: Optional[torch.optim.Optimizer] = None,
-        needle: Optional[Union[ComposerScheduler,
+        schedulers: Optional[Union[ComposerScheduler,
                                LRScheduler,
                                Sequence[Union[ComposerScheduler,
                                               LRScheduler,
@@ -1620,14 +1620,14 @@ class Trainer:
         self.logger.log_hyperparameters({'rank_zero_seed': rank_zero_seed})
 
         # Schedulers
-        self.state.schedulers = _compile_schedulers(needle, self.state, scale_schedule_ratio)
+        self.state.schedulers = _compile_schedulers(schedulers, self.state, scale_schedule_ratio)
         if scale_schedule_ratio != 1.0:
             if len(self.state.schedulers) == 0:
                 raise ValueError('Specifying `scale_schedule_ratio` without `schedulers` has no effect.')
             self.state.max_duration = _scale_max_duration_by_ssr(scale_schedule_ratio, self.state.max_duration)
 
         if step_schedulers_every_batch is None:
-            self._scheduler_step_frequency = _get_default_scheduler_frequency(needle)
+            self._scheduler_step_frequency = _get_default_scheduler_frequency(schedulers)
         else:
             self._scheduler_step_frequency = TimeUnit.BATCH if step_schedulers_every_batch else TimeUnit.EPOCH
 
