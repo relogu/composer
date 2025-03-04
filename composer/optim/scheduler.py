@@ -15,7 +15,6 @@ import inspect
 import logging
 import math
 import textwrap
-import types
 import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Union
@@ -1313,35 +1312,25 @@ class LambdaSchedulerState(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        group_fn_in: Callable[[int], list[dict[str, Any]]] | list[Callable[[int], dict[str, Any]]] |
-        tuple[Callable[[int], dict[str, Any]]],
+        group_fn_in: Callable[[int], list[dict[str, Any]]],
         last_epoch: int = -1,
     ):
         self.optimizer = optimizer
-        # Normalize group_fn: if not a list, assume same function for all groups.
-        if not isinstance(group_fn_in, list) and not isinstance(group_fn_in, tuple):
-            self.group_fn = [group_fn_in] * len(optimizer.param_groups)
-        else:
-            if len(group_fn_in) != len(optimizer.param_groups):
-                raise ValueError(f'Expected {len(optimizer.param_groups)} functions, got {len(group_fn_in)}')
-            self.group_fn = list(group_fn_in)
+
+        self.group_fn = group_fn_in
+
         super().__init__(optimizer, last_epoch)
 
     def state_dict(self):
         state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'group_fn')}
-        state_dict['group_fn'] = [None] * len(self.group_fn)
-        for idx, fn in enumerate(self.group_fn):
-            if not isinstance(fn, types.FunctionType):
-                state_dict['group_fn'][idx] = fn.__dict__.copy()  # type: ignore[reportArgumentType]
+        state_dict['group_fn'] = self.group_fn.__dict__.copy()  # type: ignore[reportArgumentType]
         return state_dict
 
     def load_state_dict(self, state_dict):
-        lr_lambdas: list[dict[str, Any] | None] = state_dict.pop('group_fn')
+        lr_lambda: dict[str, Any] = state_dict.pop('group_fn')
         self.__dict__.update(state_dict)
-        state_dict['group_fn'] = lr_lambdas
-        for idx, fn in enumerate(lr_lambdas):
-            if fn is not None:
-                self.group_fn[idx].__dict__.update(fn)
+        state_dict['group_fn'] = lr_lambda
+        self.group_fn.__dict__.update(lr_lambda)
 
     def step(self, epoch: int | None = None):
         if epoch is None:
@@ -1349,9 +1338,7 @@ class LambdaSchedulerState(LRScheduler):
         else:
             self.last_epoch = epoch
 
-        new_group_params_list: list[dict[str, Any]] = [
-            fn(self.last_epoch) for fn in self.group_fn
-        ]  # type: ignore[reportAssignmentType]
+        new_group_params_list: list[dict[str, Any]] = self.group_fn(self.last_epoch)
         # new_group_params_list is expected to be a list of dicts.
         for group, new_params in zip(self.optimizer.param_groups, new_group_params_list):
             for key, value in new_params.items():
@@ -1409,7 +1396,7 @@ class QuasiHyperbolicScheduler(ComposerSchedulerForGroups, ComposerScheduler):
             else:
                 return self.b1_end
 
-    def __call__(self, state: Any, ssr: float = 1.0) -> list[dict[str, float]]:
+    def __call__(self, state: State) -> list[dict[str, float]]:
         # Extract current base values directly from the optimizer parameter groups.
         groups = state.optimizers[0].param_groups
 
