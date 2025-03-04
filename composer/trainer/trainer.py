@@ -1070,11 +1070,11 @@ class Trainer:
         # Optimizers and Scheduling
         optimizers: Optional[torch.optim.Optimizer] = None,
         schedulers: Optional[Union[ComposerScheduler,
-                               LRScheduler,
-                               Sequence[Union[ComposerScheduler,
-                                              LRScheduler,
-                                             ]],
-                              ]] = None,
+                                   LRScheduler,
+                                   Sequence[Union[ComposerScheduler,
+                                                  LRScheduler,
+                                                 ]],
+                                  ]] = None,
         scale_schedule_ratio: float = 1.0,
         step_schedulers_every_batch: Optional[bool] = None,
 
