@@ -1,19 +1,23 @@
 # Copyright 2024 MosaicML Composer authors
 # SPDX-License-Identifier: Apache-2.0
 
-r"""Implementation of the ADOPT optimizer.
+r"""Implementation of the QHADOPT (Quasi-hyperbolic ADOPT) optimizer.
 
-Paper: https://arxiv.org/abs/2411.02853
+ADOPT Paper: https://arxiv.org/abs/2411.02853
 Original code: https://github.com/iShohei220/adopt
-
+Quasi-hyperbolic ADAM: https://arxiv.org/abs/1810.06801
 ADOPT (Adam with Optimal Rate for any \beta_2) is a gradient-based optimizer
 designed to fix the convergence of Adam while introducing an adaptive
 clipping step to stabilize updates and handle large gradients effectively.
 
-This module provides both the high-level :class:`ADOPT` class, an `Optimizer`
+It'q quasi-hyperbolic variant, QHADOPT, incorporates  a convex combination of
+the current gradient and the first momentum to enable using higher values of
+:math:`\beta_1` in its update rule.
+
+This module provides both the high-level :class:`QHADOPT` class, an `Optimizer`
 subclass suitable for direct usage, and the low-level functional API
-:func:`adopt` that performs the same computations. Typically, users will
-instantiate the :class:`ADOPT` class.
+:func:`qhadopt` that performs the same computations. Typically, users will
+instantiate the :class:`QHADOPT` class.
 """
 
 import math
@@ -68,20 +72,28 @@ def _default_clip_lambda(step: Number | Tensor | Any) -> float:
 
 
 class QHADOPT(Optimizer):
-    r"""Implements the ADOPT algorithm.
+    r"""Implements the QHADOPT algorithm.
 
     This is a variant of Adam designed to
     converge optimally for any :math:`\beta_2`,
     featuring an adaptive clipping
-    mechanism.
+    mechanism. Furthermore, it's update rule incorporates a convex combination of
+    the current gradient and the first momentum to enable using higher values of
+    :math:`\beta_1`.
 
-    :class:`ADOPT` builds upon Adam with an additional per-step clipping of
+
+    :class:`QHADOPT` builds upon Adam with an additional per-step clipping of
     normalized gradients. The clipping threshold can be controlled via a user-
     defined function ``clip_lambda(step)`` or the default
     :func:`_default_clip_lambda`.
 
     The default threshold is :math:`\text{step}^{0.25}`, which was found to
     stabilize updates over the training process.
+
+    Controlling the importance of the momenta in the update is done via
+    the v1 hyperparameter. The default value is 0.9 which
+    attempts to keep the update as close to ADOPT as possible while
+    significantly increasing the coefficient of the first momentum.
 
     This optimizer shares many of Adam's hyperparameters but modifies
     the second moment computations and update rules to incorporate this
@@ -96,8 +108,7 @@ class QHADOPT(Optimizer):
         betas (Tuple[float, float], optional): Coefficients used for
             computing running averages of gradient and its square
             (default: (0.9, 0.9999)).
-        vs (Tuple[float, float], optional): Coefficients used for computing
-            quasi-hyperbolic updates (default: (1.0,1.0)).
+        v (float, optional): Quasi-hyperbolic parameter for the first moment
         eps (float, optional): Term added to the denominator to improve
             numerical stability (default: 1e-6).
         clip_lambda (callable, optional): A function that, given the current
@@ -125,10 +136,10 @@ class QHADOPT(Optimizer):
 
     Example:
         >>> import torch
-        >>> from adopt_optimizer import ADOPT
+        >>> from qhadopt import QHADOPT
         >>>
         >>> model = MyModel()
-        >>> optimizer = ADOPT(model.parameters(), lr=1e-3)
+        >>> optimizer = QHADOPT(model.parameters(), lr=1e-3)
         >>>
         >>> for input, target in data:
         ...     def closure():
@@ -165,7 +176,7 @@ class QHADOPT(Optimizer):
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
         betas: tuple[float, float] = (0.999, 0.9999),
-        vs: tuple[float, float] = (0.7, 1.0),
+        v: float = 0.9,
         eps: float = 1e-6,
         clip_lambda: Optional[Callable[[Number | Tensor | Any], float]] = _default_clip_lambda,
         weight_decay: float = 0.0,
@@ -195,7 +206,7 @@ class QHADOPT(Optimizer):
         defaults = dict(
             lr=lr,
             betas=betas,
-            vs=vs,
+            v=v,
             eps=eps,
             weight_decay=weight_decay,
             decouple=decouple,
@@ -261,7 +272,7 @@ class QHADOPT(Optimizer):
         exp_avg_sqs,
         state_steps,
     ):
-        """Initialize a parameter group for ADOPT updates.
+        """Initialize a parameter group for QHADOPT updates.
 
         This internal helper function:
         - Filters out parameters that do not have gradients.
@@ -287,7 +298,7 @@ class QHADOPT(Optimizer):
             has_complex |= torch.is_complex(p)
             params_with_grad.append(p)
             if p.grad.is_sparse:
-                raise RuntimeError('ADOPT does not support sparse gradients')
+                raise RuntimeError('QHADOPT does not support sparse gradients')
             grads.append(p.grad)
 
             state = self.state[p]
@@ -334,7 +345,7 @@ class QHADOPT(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single ADOPT optimization step.
+        """Performs a single QHADOPT optimization step.
 
         Args:
             closure (callable, optional): A closure that reevaluates the model
@@ -360,8 +371,9 @@ class QHADOPT(Optimizer):
             exp_avgs: list[Tensor] = []
             exp_avg_sqs: list[Tensor] = []
             state_steps: list[Tensor] = []
-            v1, _v2 = cast(tuple[float, float], group['vs'])
             beta1, beta2 = cast(tuple[float, float], group['betas'])
+            # Quasi-hyperbolic params
+            v1 = cast(float, group['v'])
             # NOTE: We don't have anything related to AMSGrad here
 
             has_complex = self._init_group(
@@ -440,10 +452,43 @@ class QHADOPT(Optimizer):
         initial_lr = self.param_groups[0]['initial_lr']
         decouple = self.param_groups[0]['decouple']
 
+        # NOTE: This may be too heavy
+        # we may have to decrease the frequency of the
+        # optimizer monitor
         if param in self.state:
             param_optim_state = self.state[param]
-            # NOTE: This is inverting the ADOPT update to recover the step tensor
-            step_tensor = lr * param_optim_state['exp_avg']
+            # NOTE: This is inverting the QHADOPT update to recover the step tensor
+
+            # Retrieve needed buffers from the optimizer’s state
+            grad = param.grad
+
+            if grad is None:
+                # Nothing to report
+                return optimizer_metrics
+
+            exp_avg = cast(Tensor, param_optim_state['exp_avg'])  # 1st moment buffer
+            exp_avg_sq = cast(Tensor, param_optim_state['exp_avg_sq'])  # 2nd moment buffer
+            v1 = cast(float, param_optim_state['v1'])  # Quasi-hyperbolic parameter
+            eps = cast(float, param_optim_state['eps'])  # Epsilon
+            step = cast(int, param_optim_state['step'])
+
+            # 2) Recompute the denominator
+            denom = torch.clamp(exp_avg_sq.sqrt(), eps)
+
+            # 3) Normalize the gradient
+            normed_grad = grad.div(denom)
+
+            if self.clip_lambda is not None:
+                clip = self.clip_lambda(step)
+                normed_grad = grad.div(denom)
+                normed_grad.clamp_(-clip, clip)
+
+            # In-place modification of normed_grad:
+            # normed_grad := (1 - v1) * normed_grad + v1 * exp_avg
+            normed_grad.mul_(1 - v1)
+            normed_grad.add_(exp_avg, alpha=v1)
+
+            step_tensor = lr * normed_grad
             if weight_decay != 0 and decouple:
                 decay_factor = (lr / initial_lr) if initial_lr else 1.0
                 scaling_factor = (decay_factor * weight_decay) / (1 - decay_factor * weight_decay)
@@ -459,36 +504,51 @@ class QHADOPT(Optimizer):
 
 
 QHADOPT.__doc__ = (
-    r"""Implements QHADOPT algorithm.
+    r"""Implements a variant of QHADOPT where the first moment is updated traditionally,
+    but the parameter update uses a convex combination of the fresh normalized
+    gradient and the updated momentum.
 
     .. math::
     \begin{aligned}
         &\rule{110mm}{0.4pt}                                                                 \\
         &\textbf{input}      : \alpha_t \text{ (lr)}, \: \beta_1, \beta_2 \text{ (betas)},
-           \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)},
+           \: v_1 \text{ (blend factor)}, \: \theta_0 \text{ (params)},
+           \: f(\theta) \text{ (objective)},
            \: \epsilon \text{ (epsilon)}, \: c_t \text{ (clip)}                              \\
-        &\textbf{initialize} : m_0 \leftarrow 0 \text{ (first moment)},
-           \quad v_0 \leftarrow g_0^2 \text{ (second moment)}                                 \\[-1.ex]
+        &\textbf{initialize} : m_0 \leftarrow 0 \text{ (first moment buffer)},
+           \quad v_0 \leftarrow g_0^2 \text{ (second moment buffer)}                         \\[-1.ex]
         &\rule{110mm}{0.4pt}                                                                 \\
         &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                          \\
 
-        &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                        \\
-        &\hspace{10mm}g_t \leftarrow -\nabla_{\theta} f(\theta_{t-1})                         \\
-        &\hspace{5mm}\textbf{else}                                                            \\
-        &\hspace{10mm}g_t \leftarrow \nabla_{\theta} f(\theta_{t-1})                          \\
+        &\quad\textbf{if} \: \textit{maximize}:                                              \\
+        &\quad\quad g_t \leftarrow -\nabla_{\theta} f(\theta_{t-1})                          \\
+        &\quad\textbf{else}                                                                  \\
+        &\quad\quad g_t \leftarrow \nabla_{\theta} f(\theta_{t-1})                           \\[1.ex]
 
-        &\hspace{5mm}m_t \leftarrow \beta_1 \, m_{t-1} \;+\;
-            \bigl(1 - \beta_1\bigr)\,\mathrm{Clip}\!\Bigl(
-                \frac{g_t}{\max\{\sqrt{v_{t-1}}, \,\epsilon\}},\, c_t
-            \Bigr)                                                                            \\
+        &\quad \hat{g}_t \;=\;
+            \mathrm{Clip}\!\Bigl(
+                \frac{g_t}{\max\{\sqrt{v_{t-1}}, \,\epsilon\}},\;
+                c_t
+            \Bigr),                                                                           \\[1.ex]
 
-        &\hspace{5mm}\theta_t \leftarrow \theta_{t-1} \;-\; \alpha_t \, m_t                  \\
-        &\hspace{5mm}v_t \leftarrow \beta_2 \, v_{t-1} \;+\;
-            \bigl(1 - \beta_2\bigr)\,g_t^2                                                    \\
+        &\quad m_t \;\leftarrow\;
+            \beta_1 \, m_{t-1}
+            \;+\;\bigl(1 - \beta_1\bigr)\,\hat{g}_t,                                          \\[1.ex]
+
+        &\quad \theta_t \;\leftarrow\;
+            \theta_{t-1}
+            \;-\;\alpha_t\,
+            \Bigl[\,(1 - v_1)\,\hat{g}_t
+            \;+\; v_1\,m_t\Bigr],                                                            \\[1.ex]
+
+        &\quad v_t \;\leftarrow\;
+            \beta_2\,v_{t-1} \;+\;
+            \bigl(1 - \beta_2\bigr)\,g_t^2,                                                   \\[1.ex]
+
         &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-        &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+        &\bf{return} \:\theta_t                                                       \\[-1.ex]
         &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-   \end{aligned}
+    \end{aligned}
 
     For further details regarding the algorithm we refer to the original research paper_.
     """ + rf"""
@@ -513,6 +573,7 @@ QHADOPT.__doc__ = (
         {_fused_doc}
     .. _ADOPT: Modified Adam Can Converge with Any β2 with the Optimal Rate:
         https://arxiv.org/abs/2411.02853
+    .. _Quasi-hyperbolic ADAM: https://arxiv.org/pdf/1810.06801
     """
 )
 
@@ -540,7 +601,7 @@ def _single_tensor_qhadopt(
     differentiable: bool,
     has_complex: bool,
 ):
-    """Single-tensor implementation of ADOPT step.
+    """Single-tensor implementation of QHADOPT step.
 
     Args:
         params (list[Tensor]): List of parameters to be updated.
@@ -557,6 +618,7 @@ def _single_tensor_qhadopt(
             given the step.
         beta1 (float): Exponential decay rate for the first moment.
         beta2 (float): Exponential decay rate for the second moment.
+        v1 (float): Quasi-hyperbolic parameter for the first moment.
         lr (float or Tensor): Learning rate.
         weight_decay (float): Weight decay coefficient.
         eps (float): Term added to the denominator to improve numerical stability.
@@ -663,7 +725,7 @@ def _multi_tensor_qhadopt(
     capturable: bool,
     differentiable: bool,
 ):
-    """Multi-tensor implementation of the ADOPT step.
+    """Multi-tensor implementation of the QHADOPT step.
 
     This performs updates on groups of tensors to improve
     performance when many parameters are involved.
@@ -848,7 +910,7 @@ def _fused_qhadopt(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
-    """Fused implementation of the ADOPT step.
+    """Fused implementation of the QHADOPT step.
 
     .. warning::
         This is not yet implemented. It raises :class:`NotImplementedError`.
@@ -909,7 +971,7 @@ def qhadopt(
     eps: float,
     maximize: bool,
 ):
-    r"""Functional API that performs the ADOPT algorithm step.
+    r"""Functional API that performs the QHADOPT algorithm step.
 
     It directly applies the parameter updates in-place, modifying:
     - ``params`` in place.
@@ -973,7 +1035,7 @@ def qhadopt(
 
     Example:
         >>> import torch
-        >>> from adopt_optimizer import adopt, _default_clip_lambda
+        >>> from qhadopt import adopt, _default_clip_lambda
         >>>
         >>> # Suppose p, grad, exp_avg, exp_avg_sq, step are Tensors
         >>> p = torch.randn(3, requires_grad=True)
@@ -982,7 +1044,7 @@ def qhadopt(
         >>> exp_avg_sq = torch.zeros_like(p)
         >>> step = torch.zeros((), dtype=torch.float)
         >>>
-        >>> adopt(
+        >>> qhadopt(
         ...     params=[p], grads=[grad],
         ...     exp_avgs=[exp_avg], exp_avg_sqs=[exp_avg_sq],
         ...     state_steps=[step],

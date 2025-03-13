@@ -16,11 +16,8 @@ import logging
 import math
 import textwrap
 import warnings
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Union, cast
+from typing import TYPE_CHECKING, Union
 
-from torch import Tensor
-from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 
 from composer.core import State, Time, TimeUnit
@@ -35,9 +32,7 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     'ComposerScheduler',
-    'ComposerSchedulerForGroups',
     'compile_composer_scheduler',
-    'compile_composer_stateful_scheduler',
     'StepScheduler',
     'MultiStepScheduler',
     'ConstantScheduler',
@@ -53,8 +48,6 @@ __all__ = [
     'ConstantWithLinearCooldownWithWarmupScheduler',
     'ConstantWithSqrtCooldownWithWarmupScheduler',
     'PolynomialWithWarmupScheduler',
-    'LRSchedulerState',
-    'QuasiHyperbolicScheduler',
 ]
 
 
@@ -137,67 +130,6 @@ class ComposerScheduler(Protocol):
             ssr (float): The scale schedule ratio. In general, the learning rate computed by this
                 scheduler at time :math:`t` with an SSR of 1.0 should be the same as that computed by
                 this scheduler at time :math:`t \times s` with an SSR of :math:`s`. Default = ``1.0``.
-
-        Returns:
-            alpha (float): A multiplier to apply to the optimizer's provided learning rate.
-        """
-        raise NotImplementedError
-
-
-class ComposerSchedulerForGroups(Protocol):
-    r"""Specification for a stateless scheduler function which sets all group params.
-
-    While this specification is provided as a Python class, an ordinary function can implement this interface as long
-    as it matches the signature of this interface's :meth:`~.ComposerScheduler.__call__` method.
-
-    For example, a scheduler that halves the learning rate after 10 epochs could be written as:
-
-    .. code:: python
-
-        def ten_epoch_decay_scheduler(state: State) -> float:
-            if state.timestamp.epoch < 10:
-                return 1.0
-            return 0.5
-
-        # ten_epoch_decay_scheduler is a valid ComposerScheduler
-        trainer = Trainer(
-            schedulers=[ten_epoch_decay_scheduler],
-            ...
-        )
-
-    In order to allow schedulers to be configured, schedulers may also written as callable classes:
-
-    .. code:: python
-
-        class VariableEpochDecayScheduler(ComposerScheduler):
-
-            def __init__(num_epochs: int):
-                self.num_epochs = num_epochs
-
-            def __call__(state: State) -> float:
-                if state.time.epoch < self.num_epochs:
-                    return 1.0
-                return 0.5
-
-        ten_epoch_decay_scheduler = VariableEpochDecayScheduler(num_epochs=10)
-        # ten_epoch_decay_scheduler is also a valid ComposerScheduler
-        trainer = Trainer(
-            schedulers=[ten_epoch_decay_scheduler],
-            ...
-        )
-
-    The constructions of ``ten_epoch_decay_scheduler`` in each of the examples above are equivalent. Note that neither
-    scheduler uses the ``scale_schedule_ratio`` parameter. As long as this parameter is not used when initializing
-    :class:`.Trainer`, it is not required that any schedulers implement that parameter.
-
-    .. automethod:: __call__
-    """
-
-    def __call__(self, state: State) -> list[dict[str, Any]]:
-        r"""Base class for schedulers which change all parameters.
-
-        Args:
-            state (State): The current Composer Trainer state.
 
         Returns:
             alpha (float): A multiplier to apply to the optimizer's provided learning rate.
@@ -1248,206 +1180,3 @@ class PolynomialWithWarmupScheduler(ComposerScheduler):
         coeff = (1 - frac_of_total)**self.power
         current_factor = self.alpha_f + coeff * (1.0 - self.alpha_f)
         return current_factor
-
-
-class LRSchedulerState(LRScheduler):
-    r"""Base class for schedulers that update optimizer parameter groups.
-
-    This class is modeled after torch.optim.lr_scheduler.LRScheduler. Instead of a get_lr method,
-    subclasses must implement get_group_params(), which returns a list of dictionaries—one per
-    parameter group—with keys corresponding to parameters to update (for example, "vs", "betas").
-    """
-    _get_lr_called_within_step: bool = False
-
-    def get_group_params(self) -> list[dict[str, Any]]:
-        raise NotImplementedError('Subclasses must implement get_group_params().')
-
-    def step(self, epoch: int | None = None):
-        # Warn if optimizer.step() not called before scheduler.step() (per PyTorch conventions)
-        if self._step_count == 1:
-            if not hasattr(self.optimizer.step, '_wrapped_by_lr_sched'):
-                warnings.warn(
-                    'It appears that `optimizer.step()` has been overridden. '
-                    'Ensure to call `optimizer.step()` before `lr_scheduler.step()`.',
-                    UserWarning,
-                )
-            elif not getattr(self.optimizer, '_opt_called', False):
-                warnings.warn(
-                    'Detected call of `lr_scheduler.step()` before `optimizer.step()`. '
-                    'Call `optimizer.step()` before `lr_scheduler.step()`.',
-                    UserWarning,
-                )
-        self._step_count += 1
-
-        # Use context manager as in PyTorch
-        from contextlib import nullcontext
-        with nullcontext():
-            if epoch is None:
-                self.last_epoch += 1
-                new_params = self.get_group_params()
-            else:
-                warnings.warn('Passing epoch to step() is deprecated', UserWarning)
-                self.last_epoch = epoch
-                new_params = self.get_group_params()
-
-        for _i, (group, params) in enumerate(zip(self.optimizer.param_groups, new_params)):
-            for key, value in params.items():
-                # Update existing key: if tensor, use .fill_(), else assign.
-                if key in group and isinstance(group[key], Tensor):
-                    group[key].fill_(value)
-                else:
-                    group[key] = value
-
-        # For compatibility, update _last_lr based on group["lr"]
-        self._last_lr: list[float] = [group['lr'] for group in self.optimizer.param_groups]
-
-
-class LambdaSchedulerState(LRScheduler):
-    r"""A PyTorch scheduler that sets optimizer group parameters based on a provided function.
-
-    The function should compute and return a list of dictionaries, one per parameter group,
-    containing key-value pairs to update.
-    """
-
-    def __init__(
-        self,
-        optimizer: Optimizer,
-        group_fn_in: Callable[[int], list[dict[str, Any]]],
-        last_epoch: int = -1,
-    ):
-        self.optimizer = optimizer
-
-        self.group_fn = group_fn_in
-
-        super().__init__(optimizer, last_epoch)
-
-    def state_dict(self):
-        state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'group_fn')}
-        state_dict['group_fn'] = self.group_fn.__dict__.copy()  # type: ignore[reportArgumentType]
-        return state_dict
-
-    def load_state_dict(self, state_dict):
-        lr_lambda: dict[str, Any] = state_dict.pop('group_fn')
-        self.__dict__.update(state_dict)
-        state_dict['group_fn'] = lr_lambda
-        self.group_fn.__dict__.update(lr_lambda)
-
-    def step(self, epoch: int | None = None):
-        if epoch is None:
-            self.last_epoch += 1
-        else:
-            self.last_epoch = epoch
-
-        new_group_params_list: list[dict[str, Any]] = self.group_fn(self.last_epoch)
-        # new_group_params_list is expected to be a list of dicts.
-        for group, new_params in zip(self.optimizer.param_groups, new_group_params_list):
-            for key, value in new_params.items():
-                if key in group and isinstance(group[key], Tensor):
-                    group[key].fill_(value)
-                else:
-                    group[key] = value
-
-
-class QuasiHyperbolicScheduler(ComposerSchedulerForGroups, ComposerScheduler):
-    r"""Functional quasi-hyperbolic scheduler.
-
-    This scheduler computes updated parameters for each optimizer parameter group.
-    It computes:
-      - effective_v1 = base_v * (v1_scaling_start + (v1_scaling_end - v1_scaling_start) * min(t, t_v1_value) / t_v1_value)
-      - β₁ updated from base_beta to b1_end over t_b1 duration, using a nonlinear schedule (or linear if linear_b1 is True).
-
-    The durations t_v1 and t_b1 may be specified as a string or Time object and are converted via _convert_time.
-    This class is entirely stateless; it does not cache any base values.
-    """
-
-    def __init__(
-        self,
-        v1_scaling_start: float = 1.0,
-        v1_scaling_end: float = 0.7,
-        b1_end: float = 0.999,
-        t_v1: Union[str, Any] = '1dur',
-        t_b1: Union[str, Any] = '1dur',
-        *,
-        linear_b1: bool = False,
-    ):
-        self.v1_scaling_start = v1_scaling_start
-        self.v1_scaling_end = v1_scaling_end
-        self.b1_end = b1_end
-        self.t_v1 = t_v1
-        self.t_b1 = t_b1
-        self.linear_b1 = linear_b1
-
-    def get_v1(self, t: float, base_v: float, t_v1_value: float) -> float:
-        factor = self.v1_scaling_start + (self.v1_scaling_end - self.v1_scaling_start) * min(t, t_v1_value) / t_v1_value
-        return base_v * factor
-
-    def get_beta1(self, t: float, base_beta: float, t_b1_value: float) -> float:
-        if self.linear_b1:
-            return base_beta + (self.b1_end - base_beta) * min(t, t_b1_value) / t_b1_value
-        else:
-            if t_b1_value > 0 and t < t_b1_value:
-                fraction = t / t_b1_value
-                denom = (1 - fraction) * math.log(self.b1_end) + fraction * math.log(base_beta)
-                if denom == 0:
-                    new_beta_candidate = base_beta
-                else:
-                    new_beta_candidate = math.exp((math.log(base_beta) * math.log(self.b1_end)) / denom)
-                return min(new_beta_candidate, self.b1_end)
-            else:
-                return self.b1_end
-
-    def __call__(self, state: State) -> list[dict[str, float]]:
-        # Extract current base values directly from the optimizer parameter groups.
-        groups = state.optimizers[0].param_groups
-
-        # Convert durations using Composer's _convert_time.
-        converted_t_v1 = _convert_time(self.t_v1, state)
-        converted_t_b1 = _convert_time(self.t_b1, state)
-        t_v1_value = float(converted_t_v1.value)
-        t_b1_value = float(converted_t_b1.value)
-
-        # Get current time from state.timestamp using the unit of t_v1.
-        current_time = state.timestamp.get(converted_t_v1.unit)
-        t = float(current_time.value)
-
-        new_params = []
-        for group in groups:
-            # Extract the current (base) v₁ and β₁ for this group.
-            base_v, base_v2 = cast(tuple[float,float], group['vs'])
-            base_beta, base_beta2 = cast(tuple[float,float], group['betas'])
-            new_v1 = self.get_v1(t, base_v, t_v1_value)
-            new_beta1 = self.get_beta1(t, base_beta, t_b1_value)
-            new_params.append({'vs': (new_v1,base_v2), 'betas': (new_beta1,base_beta2)})
-        return new_params
-
-
-def compile_composer_stateful_scheduler(scheduler: ComposerSchedulerForGroups, state: State) -> LRScheduler:
-    """Converts a stateless scheduler into a PyTorch scheduler object.
-
-    While the resulting scheduler provides a ``.step()`` interface similar to other PyTorch schedulers, the scheduler is
-    also given a bound reference to the current :class:`~composer.core.State`. This means that any internal state updated
-    by ``.step()`` can be ignored, and the scheduler can instead simply use the bound state to recalculate the current
-    learning rate.
-
-    Args:
-        scheduler (ComposerScheduler): A stateless scheduler, provided as a :class:`~.ComposerScheduler` object.
-        state (State): The Composer Trainer's state.
-
-    Returns:
-        compiled_scheduler (LRScheduler): The scheduler, in a form compatible with PyTorch scheduler interfaces.
-    """
-    # optimizers = weakref.proxy(state.optimizers)
-    optimizers = state.optimizers
-    if len(optimizers) != 1:
-        raise NotImplementedError('Providing functional schedulers is unsupported with multiple optimizers.')
-    # optimizer = weakref.proxy(optimizers[0])
-    optimizer = optimizers[0]
-
-    def scheduler_fn(epoch: int) -> list[dict[str, float]]:
-        del epoch  # unused. Provided by the pytorch LambdaLR
-
-        return scheduler(state)
-
-    lambda_scheduler = LambdaSchedulerState(optimizer, scheduler_fn)
-
-    return lambda_scheduler

@@ -49,8 +49,6 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader, DistributedSampler
 from torchmetrics import Metric
 
-from composer.optim.scheduler import ComposerSchedulerForGroups, compile_composer_stateful_scheduler
-
 if version.parse(torch.__version__) >= version.parse('2.3.0'):
     from torch.amp.grad_scaler import GradScaler, _refresh_per_optimizer_state  # type: ignore
 else:
@@ -204,16 +202,7 @@ def _compile_schedulers(
 ) -> list[LRScheduler]:
     compiled_schedulers = []
     for scheduler in ensure_tuple(schedulers):
-        if isinstance(scheduler, ComposerSchedulerForGroups):  # type: ignore
-            compiled_schedulers.append(
-                compile_composer_stateful_scheduler(
-                    scheduler,
-                    # NOTE: Passing a weakref to avoid circular reference
-                    weakref.proxy(state),
-                    # state,
-                ),
-            )
-        elif isinstance(scheduler, LRScheduler):
+        if isinstance(scheduler, LRScheduler):
             scale_pytorch_scheduler(scheduler, scale_schedule_ratio)
             compiled_schedulers.append(scheduler)
         # It's a composer scheduler
