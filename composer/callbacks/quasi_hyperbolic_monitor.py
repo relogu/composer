@@ -48,7 +48,7 @@ class QuasiHyperbolicMonitor(Callback):
         assert state.optimizers is not None, 'optimizers must be defined'
         step = state.timestamp.batch.value
         for optimizer in state.optimizers:
-            vs: list[float] = [group['v'] for group in optimizer.param_groups]
+            vs: list[float] = [group['v1'] for group in optimizer.param_groups]
             name = optimizer.__class__.__name__
             for idx, v1 in enumerate(vs):
                 logger.log_metrics({f'v1-{name}/group{idx}': v1}, step)

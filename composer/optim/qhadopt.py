@@ -176,7 +176,7 @@ class QHADOPT(Optimizer):
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
         betas: tuple[float, float] = (0.999, 0.9999),
-        v: float = 0.9,
+        v1: float = 0.9,
         eps: float = 1e-6,
         clip_lambda: Optional[Callable[[Number | Tensor | Any], float]] = _default_clip_lambda,
         weight_decay: float = 0.0,
@@ -206,7 +206,7 @@ class QHADOPT(Optimizer):
         defaults = dict(
             lr=lr,
             betas=betas,
-            v=v,
+            v1=v1,
             eps=eps,
             weight_decay=weight_decay,
             decouple=decouple,
@@ -373,7 +373,7 @@ class QHADOPT(Optimizer):
             state_steps: list[Tensor] = []
             beta1, beta2 = cast(tuple[float, float], group['betas'])
             # Quasi-hyperbolic params
-            v1 = cast(float, group['v'])
+            v1 = cast(float, group['v1'])
             # NOTE: We don't have anything related to AMSGrad here
 
             has_complex = self._init_group(
@@ -451,6 +451,9 @@ class QHADOPT(Optimizer):
         weight_decay = self.param_groups[0]['weight_decay']
         initial_lr = self.param_groups[0]['initial_lr']
         decouple = self.param_groups[0]['decouple']
+        _, beta2 = cast(tuple[float, float], self.param_groups[0]['betas'])
+        v1 = cast(float, self.param_groups[0]['v1'])  # Quasi-hyperbolic parameter
+        eps = cast(float, self.param_groups[0]['eps'])  # Epsilon
 
         # NOTE: This may be too heavy
         # we may have to decrease the frequency of the
@@ -468,17 +471,23 @@ class QHADOPT(Optimizer):
 
             exp_avg = cast(Tensor, param_optim_state['exp_avg'])  # 1st moment buffer
             exp_avg_sq = cast(Tensor, param_optim_state['exp_avg_sq'])  # 2nd moment buffer
-            v1 = cast(float, param_optim_state['v1'])  # Quasi-hyperbolic parameter
-            eps = cast(float, param_optim_state['eps'])  # Epsilon
             step = cast(int, param_optim_state['step'])
 
+            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+            # Invert the sqrt update to recover
+            # the old exp_avg_sq
+            old_exp_avg_sq = (exp_avg_sq - grad**2 * (1 - beta2)) / beta2
+
             # 2) Recompute the denominator
-            denom = torch.clamp(exp_avg_sq.sqrt(), eps)
+            denom = torch.clamp(old_exp_avg_sq.sqrt(), eps)
 
             # 3) Normalize the gradient
             normed_grad = grad.div(denom)
 
             if self.clip_lambda is not None:
+                # NOTE: it is not clear if we should use the current step
+                # or step-1
                 clip = self.clip_lambda(step)
                 normed_grad = grad.div(denom)
                 normed_grad.clamp_(-clip, clip)
