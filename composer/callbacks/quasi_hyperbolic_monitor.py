@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Monitor vs during training."""
-from typing import cast
 
 from composer.core import Callback, State
 from composer.loggers import Logger
@@ -11,10 +10,9 @@ __all__ = ['QuasiHyperbolicMonitor']
 
 
 class QuasiHyperbolicMonitor(Callback):
-    """Logs hyperbolic v1 and v2 parameters.
+    """Logs hyperbolic v1 parameter.
 
-    This callback iterates over all optimizers and their parameter groups to log
-    vs under the ``beta_1-{OPTIMIZER_NAME}/group{GROUP_NUMBER}``, ``beta_2-{OPTIMIZER_NAME}/group{GROUP_NUMBER}`` keys.
+    This callback iterates over all optimizers and their parameter groups to log v1 under the ``v1-{OPTIMIZER_NAME}/group{GROUP_NUMBER}`` key.
 
     Example:
         .. doctest::
@@ -38,7 +36,7 @@ class QuasiHyperbolicMonitor(Callback):
     | Key                                         | Logged data                           |
     +=============================================+=======================================+
     |                                             | vs for each optimizer and  |
-    | ``beta_{idx}-{OPTIMIZER_NAME}/group{GROUP_NUMBER}`` | parameter group for that optimizer is |
+    | ``v_{idx}-{OPTIMIZER_NAME}/group{GROUP_NUMBER}`` | parameter group for that optimizer is |
     |                                             | logged to a separate key.             |
     +---------------------------------------------+---------------------------------------+
     """
@@ -50,9 +48,7 @@ class QuasiHyperbolicMonitor(Callback):
         assert state.optimizers is not None, 'optimizers must be defined'
         step = state.timestamp.batch.value
         for optimizer in state.optimizers:
-            vs = [group['vs'] for group in optimizer.param_groups]
+            vs: list[float] = [group['v'] for group in optimizer.param_groups]
             name = optimizer.__class__.__name__
-            for idx, beta_tuple in enumerate(vs):
-                v1, v2 = cast(tuple[float, float], beta_tuple)
+            for idx, v1 in enumerate(vs):
                 logger.log_metrics({f'v1-{name}/group{idx}': v1}, step)
-                logger.log_metrics({f'v2-{name}/group{idx}': v2}, step)
