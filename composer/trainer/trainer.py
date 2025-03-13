@@ -17,7 +17,6 @@ import tempfile
 import textwrap
 import time
 import warnings
-import weakref
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
@@ -210,9 +209,7 @@ def _compile_schedulers(
             compiled_schedulers.append(
                 compile_composer_scheduler(
                     scheduler,
-                    # NOTE: Passing a weakref to avoid circular reference
-                    weakref.proxy(state),
-                    # state,
+                    state,
                     scale_schedule_ratio,
                 ),
             )
@@ -1022,7 +1019,6 @@ class Trainer:
             To use torch compile with default values, set it to empty dictionary ``{}``.
             To use torch compile with custom config, set to a dictionary such as ``{'mode': 'max-autotune'}``.
             To disable torch compile, set to ``None``. (default: ``None``)
-        is_model_finetune (bool): Flag for knowing whether the model is of the finetune type. (default: ``False``)
 
     Attributes:
         state (State): The :class:`.State` object used to store training state.
@@ -1132,9 +1128,6 @@ class Trainer:
 
         # compile config for PyTorch 2.0 or higher
         compile_config: Optional[dict[str, Any]] = None,
-
-        # Is the model of the fine-tuning type
-        is_model_finetune: bool = False,
     ):
 
         self.auto_log_hparams = auto_log_hparams
@@ -1317,7 +1310,6 @@ class Trainer:
             run_name=run_name,
             save_metrics=save_metrics,
             parallelism_config=parallelism_config,
-            is_model_finetune=is_model_finetune,
         )
         self.accumulate_train_batch_on_tokens = accumulate_train_batch_on_tokens
 
@@ -1765,35 +1757,32 @@ class Trainer:
             else:
                 log.info('No previous autoresume checkpoint found')
         # Actually load the checkpoint from potentially updated arguments
-        try:
-            if load_path is not None:
-                log.info(f'Loading checkpoint from {load_path}')
-                if load_object_store is None:
-                    load_object_store = maybe_create_object_store_from_uri(load_path)
-                    log.debug(f'Created object store from load path: {load_object_store}')
-                if isinstance(load_object_store, WandBLogger):
-                    import wandb
-                    if wandb.run is None:
-                        load_object_store.init(self.state, self.logger)
-                _, _, parsed_load_path = parse_uri(load_path)
-                log.debug(f'Parsed load path: {parsed_load_path}')
+        if load_path is not None:
+            log.info(f'Loading checkpoint from {load_path}')
+            if load_object_store is None:
+                load_object_store = maybe_create_object_store_from_uri(load_path)
+                log.debug(f'Created object store from load path: {load_object_store}')
+            if isinstance(load_object_store, WandBLogger):
+                import wandb
+                if wandb.run is None:
+                    load_object_store.init(self.state, self.logger)
+            _, _, parsed_load_path = parse_uri(load_path)
+            log.debug(f'Parsed load path: {parsed_load_path}')
 
-                self._rng_state = checkpoint.load_checkpoint(
-                    state=self.state,
-                    logger=self.logger,
-                    path=parsed_load_path,
-                    object_store=load_object_store,
-                    load_weights_only=load_weights_only,
-                    strict_model_weights=load_strict_model_weights,
-                    progress_bar=load_progress_bar,
-                    ignore_keys=load_ignore_keys,
-                    exclude_algorithms=load_exclude_algorithms,
-                    algorithm_passes=self.engine.algorithm_passes,
-                )
-                self.state.run_name = run_name
-                self.state.load_path = load_path
-        except FileNotFoundError:
-            log.info('No previous checkpoint found. Train from scratch...')
+            self._rng_state = checkpoint.load_checkpoint(
+                state=self.state,
+                logger=self.logger,
+                path=parsed_load_path,
+                object_store=load_object_store,
+                load_weights_only=load_weights_only,
+                strict_model_weights=load_strict_model_weights,
+                progress_bar=load_progress_bar,
+                ignore_keys=load_ignore_keys,
+                exclude_algorithms=load_exclude_algorithms,
+                algorithm_passes=self.engine.algorithm_passes,
+            )
+            self.state.run_name = run_name
+            self.state.load_path = load_path
 
         # FSDP wrap if model is not yet wrapped and FSDP is enabled. This can happen if
         # load_monolith_rank0_only=True but no checkpoint was loaded.
@@ -2289,7 +2278,7 @@ class Trainer:
                     'second run with profiler.',
                 )
             self.state.device_train_microbatch_size = _get_initial_device_train_microbatch_size(
-                self.state.device_train_microbatch_size,
+                device_train_microbatch_size,
                 self.state.auto_microbatching,
                 self.state.train_dataloader,
             )
