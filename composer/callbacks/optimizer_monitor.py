@@ -90,7 +90,9 @@ def finalize_curvature_metrics(acc: dict[str, Any]) -> dict[str, float]:
     grad_diff_g = final_metrics.get('curvature/grad_diff_norm/global', 0.0)
     param_diff_g = final_metrics.get('curvature/param_diff_norm/global', 1.0)
 
-    final_metrics['curvature/local_lipschitz/global'] = grad_diff_g / param_diff_g
+    final_metrics['curvature/local_lipschitz/global'] = grad_diff_g / param_diff_g if param_diff_g != 0.0 else float(
+        'inf',
+    )
 
     # 3) Compute min/mean/median/max for each metric in list_for_stats
     list_for_stats = acc['list_for_stats']
