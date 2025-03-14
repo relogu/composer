@@ -52,16 +52,13 @@ def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
         # Ratio of first to second derivative
         first_to_second_derivative_ratio = torch.linalg.vector_norm(param.grad / second_derivative_estimate,)
 
-        # Local Lipschitz estimate
-        local_lipschitz = grad_diff_norm / param_diff_norm
-
         # Update stored values for next iteration
         prev_params[name] = param.detach().clone()
         prev_grads[name] = param.grad.detach().clone()
 
         return {
             f'curvature/param_diff_norm/{name}':
-                local_lipschitz,
+                param_diff_norm,
             f'curvature/grad_diff_norm/{name}':
                 grad_diff_norm,
             f'curvature/long_bb/{name}':
