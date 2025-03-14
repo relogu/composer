@@ -206,6 +206,8 @@ class DecoupledAdamW(AdamW):
         amsgrad (bool, optional): Enables the amsgrad variant of Adam. Default: ``False``.
         report_curvature: bool = False, Whether to report curvature metrics
             for each parameter. Default: False.
+        report_curvature_force_cpu: bool = True, Whether to force curvature
+            metrics to be computed on CPU. Default: True.
     """
 
     metric_functions = {
@@ -228,6 +230,7 @@ class DecoupledAdamW(AdamW):
         amsgrad: bool = False,
         *,
         report_curvature: bool = False,
+        report_curvature_force_cpu: bool = True,
     ):
         if weight_decay >= 1e-3:
             log.warning(
@@ -243,7 +246,7 @@ class DecoupledAdamW(AdamW):
         # calculations
         self.curvature_metric_function: Callable[[torch.Tensor, str], dict[str, torch.Tensor]] | None = None
         if report_curvature:
-            self.curvature_metric_function = get_report_curvature()
+            self.curvature_metric_function = get_report_curvature(report_curvature_force_cpu)
 
     @staticmethod
     def adamw(

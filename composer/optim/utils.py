@@ -9,7 +9,7 @@ import torch
 from torch import Tensor
 
 
-def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
+def get_report_curvature(cpu: bool) -> Callable[[Tensor, str], dict[str, Tensor]]:
     """Get a function that computes curvature metrics per-parameter.
 
     Returns:
@@ -29,22 +29,22 @@ def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
         # If we've never seen this parameter before, initialize storage and skip
         # this round (can't compute diffs without history).
         if name not in prev_params or name not in prev_grads:
-            prev_params[name] = param.detach().clone()
-            prev_grads[name] = param.grad.detach().clone()
+            prev_params[name] = param.detach().clone().cpu() if cpu else param.detach().clone()
+            prev_grads[name] = param.grad.detach().clone().cpu() if cpu else param.grad.detach().clone()
             return {}
 
         # Compute diffs
-        grad_diff = param.grad - prev_grads[name]
-        param_diff = param - prev_params[name]
+        grad_diff = param.grad.cpu() - prev_grads[name] if cpu else param.grad - prev_grads[name]
+        param_diff = param.cpu() - prev_params[name] if cpu else param - prev_params[name]
 
         param_diff_norm: Tensor = torch.linalg.vector_norm(param_diff)
         grad_diff_norm: Tensor = torch.linalg.vector_norm(grad_diff)
 
         # Barzilai–Borwein "long" step size
-        long_bb = param_diff_norm**2.0 / torch.mul(grad_diff, param_diff)
+        long_bb = param_diff_norm**2.0 / torch.sum(torch.mul(grad_diff, param_diff))
 
         # Barzilai–Borwein "short" step size
-        short_bb = torch.mul(grad_diff, param_diff) / grad_diff_norm**2.0
+        short_bb = torch.sum(torch.mul(grad_diff, param_diff)) / grad_diff_norm**2.0
 
         # Second-derivative estimate (elementwise ratio)
         second_derivative_estimate = grad_diff / param_diff
@@ -53,8 +53,8 @@ def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
         first_to_second_derivative_ratio = torch.linalg.vector_norm(param.grad / second_derivative_estimate,)
 
         # Update stored values for next iteration
-        prev_params[name] = param.detach().clone()
-        prev_grads[name] = param.grad.detach().clone()
+        prev_params[name] = param.detach().clone().cpu() if cpu else param.detach().clone()
+        prev_grads[name] = param.grad.detach().clone() if cpu else param.grad.detach().clone()
 
         return {
             f'curvature/param_diff_norm/{name}':

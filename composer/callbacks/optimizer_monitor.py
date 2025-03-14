@@ -51,11 +51,11 @@ def accumulate_curvature_metrics(
 
     # Accumulate
     for metric_name, metric_value in optimizer_metrics.items():
-        # Convert any Tensor to a Python float
-        val = metric_value.item() if isinstance(metric_value, torch.Tensor) else metric_value
 
         for prefix in metric_name_prefixes:
             if metric_name.startswith(prefix):
+                # Convert any Tensor to a Python float
+                val = metric_value.item() if isinstance(metric_value, torch.Tensor) else metric_value
                 if prefix in sums_for_norms:
                     # Accumulate squared sum for these prefixes
                     sums_for_norms[prefix] += val**2
@@ -281,6 +281,12 @@ class OptimizerMonitor(Callback):
             if metric.startswith('l2_norm/param'):
                 param_norm += optimizer_metrics[metric]**2
 
+        # Curvature metrics
+        curvature_acc = accumulate_curvature_metrics(optimizer_metrics)
+
+        if self.only_global:
+            optimizer_metrics = {}
+
         optimizer_metrics['l2_norm/grad/global'] = grad_norm**0.5
         optimizer_metrics['l2_norm/moment/global'] = moment_norm**0.5
         optimizer_metrics['l2_norm/moment2/global'] = moment2_norm**0.5
@@ -289,13 +295,8 @@ class OptimizerMonitor(Callback):
         optimizer_metrics['min/moment2/global'] = min_moment2
         optimizer_metrics['max/moment2/global'] = max_moment2
 
-        # Curvature metrics
-        curvature_acc = accumulate_curvature_metrics(optimizer_metrics)
         curvature_stats = finalize_curvature_metrics(curvature_acc)
         optimizer_metrics.update(curvature_stats)
-
-        if self.only_global:
-            optimizer_metrics = {}
 
         for metric in optimizer_metrics:
             if isinstance(optimizer_metrics[metric], torch.Tensor):

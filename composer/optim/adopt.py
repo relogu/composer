@@ -123,6 +123,7 @@ class ADOPT(Optimizer):
             differentiability exist). Default: None.
         report_curvature: bool = False, Whether to report curvature metrics
             for each parameter. Default: False.
+        report_curvature_force_cpu: bool = False, Whether to force curvature
 
     Example:
         >>> import torch
@@ -180,6 +181,7 @@ class ADOPT(Optimizer):
         differentiable: bool = False,
         fused: Optional[bool] = None,
         report_curvature: bool = False,
+        report_curvature_force_cpu: bool = True,
     ):
         if not 0.0 <= lr:
             raise ValueError(f'Invalid learning rate: {lr}')
@@ -225,7 +227,7 @@ class ADOPT(Optimizer):
         # calculations
         self.curvature_metric_function: Callable[[Tensor, str], dict[str, Tensor]] | None = None
         if report_curvature:
-            self.curvature_metric_function = get_report_curvature()
+            self.curvature_metric_function = get_report_curvature(report_curvature_force_cpu)
 
     def __setstate__(self, state):
         """Set the state of the optimizer for backward compatibility.
