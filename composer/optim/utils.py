@@ -41,11 +41,11 @@ def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
 
         grad_diff = param.grad - prev_grad
         param_diff = param - prev_param
-        # a = torch.dot(grad_diff, param_diff)
+
         param_diff_norm: Tensor = torch.linalg.vector_norm(param_diff)
         grad_diff_norm: Tensor = torch.linalg.vector_norm(grad_diff)
-        long_bb: Tensor = param_diff_norm**2.0 / torch.dot(grad_diff, param_diff)
-        short_bb: Tensor = torch.dot(grad_diff, param_diff) / grad_diff_norm**2.0
+        long_bb: Tensor = param_diff_norm**2.0 / torch.mul(grad_diff, param_diff)
+        short_bb: Tensor = torch.mul(grad_diff, param_diff) / grad_diff_norm**2.0
         second_derivative_estimate: Tensor = grad_diff / param_diff
         first_to_second_derivative_ratio: Tensor = torch.linalg.vector_norm(param.grad / second_derivative_estimate)
         local_lipschitz: Tensor = grad_diff_norm / param_diff_norm
