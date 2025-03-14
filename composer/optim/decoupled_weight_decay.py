@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Iterable, Optional, Union
+from typing import Callable, Iterable, Optional, Union
 
 import torch
 from torch.optim import SGD, AdamW
 from torch.optim.optimizer import required  # type: ignore
 
+from composer.optim.utils import get_report_curvature
 from composer.utils import dist
 
 log = logging.getLogger(__name__)
@@ -203,11 +204,15 @@ class DecoupledAdamW(AdamW):
         eps (float, optional): Term added to the denominator to improve numerical stability. Default: ``1e-8``.
         weight_decay (float, optional): Decoupled weight decay factor. Default: ``1e-5``.
         amsgrad (bool, optional): Enables the amsgrad variant of Adam. Default: ``False``.
+        report_curvature: bool = False, Whether to report curvature metrics
+            for each parameter. Default: False.
     """
 
     metric_functions = {
         'l2_norm/moment': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg']),
         'l2_norm/moment2': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg_sq']),
+        'min/moment2': lambda param, optim_state, step_tensor: torch.min(optim_state['exp_avg_sq']),
+        'max/moment2': lambda param, optim_state, step_tensor: torch.max(optim_state['exp_avg_sq']),
         'l2_norm/param': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(param.data),
         'l2_norm/update': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(step_tensor),
         'l2_norm/grad': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(param.grad),
@@ -221,6 +226,8 @@ class DecoupledAdamW(AdamW):
         eps: float = 1e-8,
         weight_decay: float = 1e-5,
         amsgrad: bool = False,
+        *,
+        report_curvature: bool = False,
     ):
         if weight_decay >= 1e-3:
             log.warning(
@@ -231,6 +238,12 @@ class DecoupledAdamW(AdamW):
         for group in self.param_groups:
             group['initial_lr'] = group['lr']
         self.amsgrad = amsgrad
+
+        # NOTE: Added to avoid expensive metrics
+        # calculations
+        self.curvature_metric_function: Callable[[torch.Tensor, str], dict[str, torch.Tensor]] | None = None
+        if report_curvature:
+            self.curvature_metric_function = get_report_curvature()
 
     @staticmethod
     def adamw(
@@ -433,5 +446,8 @@ class DecoupledAdamW(AdamW):
                     param_optim_state,
                     step_tensor,
                 )
+            # NOTE: these are heavy and require extra memory
+            if self.curvature_metric_function is not None:
+                optimizer_metrics.update(self.curvature_metric_function(param, name))
 
         return optimizer_metrics

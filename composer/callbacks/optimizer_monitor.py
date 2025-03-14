@@ -15,6 +15,99 @@ from composer.utils import dist
 __all__ = ['OptimizerMonitor']
 
 
+def accumulate_curvature_metrics(
+    optimizer_metrics: dict[str, torch.Tensor],
+    metric_name_prefixes: tuple[str, ...] = (
+        'curvature/param_diff_norm',
+        'curvature/grad_diff_norm',
+        'curvature/long_bb',
+        'curvature/short_bb',
+        'curvature/l2_norm/first_to_second_derivative_estimate_ratio',
+        'curvature/l2_norm/second_derivative_estimate',
+        'curvature/local_lipschitz',
+    ),
+) -> dict[str, Any]:
+    """Accumulate curvature metrics from the optimizer_metrics dictionary.
+
+    Args:
+        optimizer_metrics (dict[str, torch.Tensor]): The optimizer metrics dictionary.
+        metric_name_prefixes (tuple[str, ...]): The prefixes of the metrics to accumulate.
+
+    Returns:
+        dict[str, Any]: The accumulated curvature metrics.
+    """
+    # Initialize accumulators
+    sums_for_norms = {
+        'curvature/param_diff_norm': 0.0,
+        'curvature/grad_diff_norm': 0.0,
+    }
+    list_for_stats = {
+        'curvature/long_bb': [],
+        'curvature/short_bb': [],
+        'curvature/l2_norm/first_to_second_derivative_estimate_ratio': [],
+        'curvature/l2_norm/second_derivative_estimate': [],
+        'curvature/local_lipschitz': [],
+    }
+
+    # Accumulate
+    for metric_name, metric_value in optimizer_metrics.items():
+        # Convert any Tensor to a Python float
+        val = metric_value.item() if isinstance(metric_value, torch.Tensor) else metric_value
+
+        for prefix in metric_name_prefixes:
+            if metric_name.startswith(prefix):
+                if prefix in sums_for_norms:
+                    # Accumulate squared sum for these prefixes
+                    sums_for_norms[prefix] += val**2
+                elif prefix in list_for_stats:
+                    # Just store the float
+                    list_for_stats[prefix].append(val)
+
+    return {
+        'sums_for_norms': sums_for_norms,
+        'list_for_stats': list_for_stats,
+    }
+
+
+def finalize_curvature_metrics(acc: dict[str, Any]) -> dict[str, float]:
+    """Process the accumulated curvature metrics to produce final metrics.
+
+    Args:
+        acc (dict[str, Any]): The accumulated curvature metrics.
+
+    Returns:
+        dict[str, float]: The final curvature metrics.
+    """
+    final_metrics = {}
+
+    # 1) Compute global norms: sqrt of the sums
+    sums_for_norms = acc['sums_for_norms']
+    for prefix, squared_sum in sums_for_norms.items():
+        global_val = (squared_sum**0.5)
+        final_metrics[f'{prefix}/global'] = global_val
+
+    # 2) Reproduce the local_lipschitz/global calculation exactly as before
+    grad_diff_g = final_metrics.get('curvature/grad_diff_norm/global', 0.0)
+    param_diff_g = final_metrics.get('curvature/param_diff_norm/global', 1.0)
+
+    final_metrics['curvature/local_lipschitz/global'] = grad_diff_g / param_diff_g
+
+    # 3) Compute min/mean/median/max for each metric in list_for_stats
+    list_for_stats = acc['list_for_stats']
+    for prefix, values in list_for_stats.items():
+        if not values:
+            # No values were accumulated for this prefix
+            continue
+
+        t = torch.tensor(values, dtype=torch.float32)
+        final_metrics[f'{prefix}/mean'] = t.mean().item()
+        final_metrics[f'{prefix}/median'] = t.median().item()
+        final_metrics[f'{prefix}/min'] = t.min().item()
+        final_metrics[f'{prefix}/max'] = t.max().item()
+
+    return final_metrics
+
+
 class OptimizerMonitor(Callback):
     """Computes and logs the L2 norm of gradients as well as any optimizer-specific metrics implemented in the optimizer's `report_per_parameter_metrics` method.
 
@@ -59,6 +152,21 @@ class OptimizerMonitor(Callback):
     +-----------------------------------------------------+
     |                                               | Layer-wise L2 norms of Adam second moment after      |
     | ``l2_norm/moment2/LAYER_NAME``                 |  calling optimizer step.                            |
+    |                                               |                                                     |
+    +-----------------------------------------------
+    +-----------------------------------------------------+
+    |                                               | Minimum element of the Adam second moment after      |
+    | ``min/moment2/LAYER_NAME``                 |  calling optimizer step.                            |
+    |                                               |                                                     |
+    +-----------------------------------------------
+    +-----------------------------------------------------+
+    |                                               | Maximum element of the Adam second moment after      |
+    | ``max/moment2/LAYER_NAME``                 |  calling optimizer step.                            |
+    |                                               |                                                     |
+    +-----------------------------------------------
+    +-----------------------------------------------------+
+    |                                               | Curvature metrics derived from the gradient and model parameters      |
+    | ``curvature/METRIC_NAME``                 |  calling optimizer step.                            |
     |                                               |                                                     |
     +-----------------------------------------------
     +-----------------------------------------------------+
@@ -151,7 +259,10 @@ class OptimizerMonitor(Callback):
             if callable(dist_reduce_metrics) and self.log_optimizer_metrics:
                 optimizer_metrics = dist_reduce_metrics(optimizer_metrics)
 
-        grad_norm, moment_norm, moment2_norm, update_norm, param_norm = .0, .0, .0, .0, .0
+        grad_norm, moment_norm, moment2_norm, update_norm, param_norm = .0, .0, .0, .0, .0,
+        min_moment2 = float('inf')
+        max_moment2 = float('-inf')
+
         for metric in optimizer_metrics:
             if metric.startswith('l2_norm/grad'):
                 grad_norm += optimizer_metrics[metric]**2
@@ -159,19 +270,30 @@ class OptimizerMonitor(Callback):
                 moment_norm += optimizer_metrics[metric]**2
             if metric.startswith('l2_norm/moment2'):
                 moment2_norm += optimizer_metrics[metric]**2
+            if metric.startswith('min/moment2'):
+                min_moment2 = min(min_moment2, optimizer_metrics[metric])
+            if metric.startswith('max/moment2'):
+                max_moment2 = max(max_moment2, optimizer_metrics[metric])
             if metric.startswith('l2_norm/update'):
                 update_norm += optimizer_metrics[metric]**2
             if metric.startswith('l2_norm/param'):
                 param_norm += optimizer_metrics[metric]**2
-
-        if self.only_global:
-            optimizer_metrics = {}
 
         optimizer_metrics['l2_norm/grad/global'] = grad_norm**0.5
         optimizer_metrics['l2_norm/moment/global'] = moment_norm**0.5
         optimizer_metrics['l2_norm/moment2/global'] = moment2_norm**0.5
         optimizer_metrics['l2_norm/update/global'] = update_norm**0.5
         optimizer_metrics['l2_norm/param/global'] = param_norm**0.5
+        optimizer_metrics['min/moment2/global'] = min_moment2
+        optimizer_metrics['max/moment2/global'] = max_moment2
+
+        # Curvature metrics
+        curvature_acc = accumulate_curvature_metrics(optimizer_metrics)
+        curvature_stats = finalize_curvature_metrics(curvature_acc)
+        optimizer_metrics.update(curvature_stats)
+
+        if self.only_global:
+            optimizer_metrics = {}
 
         for metric in optimizer_metrics:
             if isinstance(optimizer_metrics[metric], torch.Tensor):

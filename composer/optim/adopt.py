@@ -40,6 +40,7 @@ from torch.optim.optimizer import (
 )
 from torch.types import Number
 
+from composer.optim.utils import get_report_curvature
 from composer.utils import dist
 
 __all__ = ['ADOPT', 'adopt']
@@ -120,6 +121,8 @@ class ADOPT(Optimizer):
         fused (bool, optional): Whether to use a fused version of the kernel
             (if supported by PyTorch and if no constraints like
             differentiability exist). Default: None.
+        report_curvature: bool = False, Whether to report curvature metrics
+            for each parameter. Default: False.
 
     Example:
         >>> import torch
@@ -154,6 +157,8 @@ class ADOPT(Optimizer):
     metric_functions = {
         'l2_norm/moment': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg']),
         'l2_norm/moment2': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg_sq']),
+        'min/moment2': lambda param, optim_state, step_tensor: torch.min(optim_state['exp_avg_sq']),
+        'max/moment2': lambda param, optim_state, step_tensor: torch.max(optim_state['exp_avg_sq']),
         'l2_norm/param': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(param.data),
         'l2_norm/update': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(step_tensor),
         'l2_norm/grad': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(param.grad),
@@ -174,6 +179,7 @@ class ADOPT(Optimizer):
         capturable: bool = False,
         differentiable: bool = False,
         fused: Optional[bool] = None,
+        report_curvature: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f'Invalid learning rate: {lr}')
@@ -213,7 +219,13 @@ class ADOPT(Optimizer):
             if foreach:
                 raise RuntimeError('`fused` and `foreach` cannot be `True` together.')
             # TODO: support fused
-            raise RuntimeError('`fused` is not currently supported')
+            raise RuntimeError('`fused` is not currently supported')\
+
+        # NOTE: Added to avoid expensive metrics
+        # calculations
+        self.curvature_metric_function: Callable[[Tensor, str], dict[str, Tensor]] | None = None
+        if report_curvature:
+            self.curvature_metric_function = get_report_curvature()
 
     def __setstate__(self, state):
         """Set the state of the optimizer for backward compatibility.
@@ -449,6 +461,9 @@ class ADOPT(Optimizer):
                     param_optim_state,
                     step_tensor,
                 )
+            # NOTE: these are heavy and require extra memory
+            if self.curvature_metric_function is not None:
+                optimizer_metrics.update(self.curvature_metric_function(param, name))
 
         return optimizer_metrics
 
