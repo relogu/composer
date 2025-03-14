@@ -207,6 +207,7 @@ class DecoupledAdamW(AdamW):
 
     metric_functions = {
         'l2_norm/moment': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg']),
+        'l2_norm/moment2': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg_sq']),
         'l2_norm/param': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(param.data),
         'l2_norm/update': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(step_tensor),
         'l2_norm/grad': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(param.grad),
