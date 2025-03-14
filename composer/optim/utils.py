@@ -8,49 +8,57 @@ from typing import Callable
 import torch
 from torch import Tensor
 
-curvature_names = {
-    'local_lipschitz': 'local_lipschitz',
-    'long_bb': 'long_bb',
-    'short_bb': 'short_bb',
-    'l2_norm/first_to_second_derivative_estimate_ratio': 'l2_norm/first_to_second_derivative_estimate_ratio',
-    'l2_norm/second_derivative_estimate': 'l2_norm/second_derivative_estimate',
-}
-
 
 def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
-    """Get the report curvature function closure.
+    """Get a function that computes curvature metrics per-parameter.
 
     Returns:
-    Callable[[Any, Any, Any], float]: The report curvature function.
-
-    Reference: AdaBB: Adaptive Barzilai-Borwein Method for Convex Optimization
-    page 2, equations 3,4,5
+        Callable[[Tensor, str], dict[str, Tensor]]: A function that, given a
+        parameter `param` and its string name `name`, returns a dictionary with
+        curvature metrics for that parameter. The function internally tracks
+        previous parameter and gradient values for each named parameter.
     """
-    prev_grad: Tensor | None = None
-    prev_param: Tensor | None = None
+    prev_params: dict[str, Tensor] = {}
+    prev_grads: dict[str, Tensor] = {}
 
     def report_curvature(param: Tensor, name: str) -> dict[str, Tensor]:
-        nonlocal prev_grad, prev_param
+        # If there's no gradient, we skip reporting
         if param.grad is None:
-            # Nothing to report
-            return {}
-        if prev_grad is None or prev_param is None:
-            prev_grad = param.grad.detach().clone()
-            prev_param = param.detach().clone()
             return {}
 
-        grad_diff = param.grad - prev_grad
-        param_diff = param - prev_param
+        # If we've never seen this parameter before, initialize storage and skip
+        # this round (can't compute diffs without history).
+        if name not in prev_params or name not in prev_grads:
+            prev_params[name] = param.detach().clone()
+            prev_grads[name] = param.grad.detach().clone()
+            return {}
+
+        # Compute diffs
+        grad_diff = param.grad - prev_grads[name]
+        param_diff = param - prev_params[name]
 
         param_diff_norm: Tensor = torch.linalg.vector_norm(param_diff)
         grad_diff_norm: Tensor = torch.linalg.vector_norm(grad_diff)
-        long_bb: Tensor = param_diff_norm**2.0 / torch.mul(grad_diff, param_diff)
-        short_bb: Tensor = torch.mul(grad_diff, param_diff) / grad_diff_norm**2.0
-        second_derivative_estimate: Tensor = grad_diff / param_diff
-        first_to_second_derivative_ratio: Tensor = torch.linalg.vector_norm(param.grad / second_derivative_estimate)
-        local_lipschitz: Tensor = grad_diff_norm / param_diff_norm
-        prev_grad = param.grad.detach().clone()
-        prev_param = param.detach().clone()
+
+        # Barzilai–Borwein "long" step size
+        long_bb = param_diff_norm**2.0 / torch.mul(grad_diff, param_diff)
+
+        # Barzilai–Borwein "short" step size
+        short_bb = torch.mul(grad_diff, param_diff) / grad_diff_norm**2.0
+
+        # Second-derivative estimate (elementwise ratio)
+        second_derivative_estimate = grad_diff / param_diff
+
+        # Ratio of first to second derivative
+        first_to_second_derivative_ratio = torch.linalg.vector_norm(param.grad / second_derivative_estimate,)
+
+        # Local Lipschitz estimate
+        local_lipschitz = grad_diff_norm / param_diff_norm
+
+        # Update stored values for next iteration
+        prev_params[name] = param.detach().clone()
+        prev_grads[name] = param.grad.detach().clone()
+
         return {
             f'curvature/param_diff_norm/{name}':
                 local_lipschitz,
