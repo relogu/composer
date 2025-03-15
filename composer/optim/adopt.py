@@ -220,7 +220,7 @@ class ADOPT(Optimizer):
             if foreach:
                 raise RuntimeError('`fused` and `foreach` cannot be `True` together.')
             # TODO: support fused
-            raise RuntimeError('`fused` is not currently supported')\
+            raise RuntimeError('`fused` is not currently supported')
 
         # NOTE: Added to avoid expensive metrics
         # calculations

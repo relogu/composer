@@ -488,8 +488,6 @@ class QHADOPT(Optimizer):
             exp_avg_sq = cast(Tensor, param_optim_state['exp_avg_sq'])  # 2nd moment buffer
             step = cast(int, param_optim_state['step'])
 
-            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
             # Invert the sqrt update to recover
             # the old exp_avg_sq
             old_exp_avg_sq = (exp_avg_sq - grad**2 * (1 - beta2)) / beta2
