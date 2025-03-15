@@ -192,7 +192,7 @@ class OptimizerMonitor(Callback):
         only_global: bool = False,
         log_optimizer_metrics: bool = True,
         interval: Union[int, str, Time] = '10ba',
-        report_curvature: bool = True,
+        report_curvature: bool = False,
     ):
         self.log_optimizer_metrics = log_optimizer_metrics
         self.only_global = only_global
