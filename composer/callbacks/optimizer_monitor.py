@@ -102,10 +102,15 @@ def finalize_curvature_metrics(acc: dict[str, Any]) -> dict[str, float]:
             continue
 
         t = torch.tensor(values, dtype=torch.float32)
-        final_metrics[f'{prefix}/mean'] = t.mean().item()
-        final_metrics[f'{prefix}/median'] = t.median().item()
-        final_metrics[f'{prefix}/min'] = t.min().item()
-        final_metrics[f'{prefix}/max'] = t.max().item()
+        # Filter out infinite values
+        finite_t = t[torch.isfinite(t)]
+        if finite_t.numel() == 0:
+            continue
+
+        final_metrics[f'{prefix}/mean'] = finite_t.mean().item()
+        final_metrics[f'{prefix}/median'] = finite_t.median().item()
+        final_metrics[f'{prefix}/min'] = finite_t.min().item()
+        final_metrics[f'{prefix}/max'] = finite_t.max().item()
 
     return final_metrics
 
