@@ -196,7 +196,6 @@ class QHADOPT(Optimizer):
         differentiable: bool = False,
         fused: Optional[bool] = None,
         report_curvature: bool = False,
-        report_curvature_force_cpu: bool = True,
     ):
         if not 0.0 <= lr:
             raise ValueError(f'Invalid learning rate: {lr}')
@@ -243,7 +242,7 @@ class QHADOPT(Optimizer):
         # calculations
         self.curvature_metric_function: Callable[[Tensor, str], dict[str, Tensor]] | None = None
         if report_curvature:
-            self.curvature_metric_function = get_report_curvature(report_curvature_force_cpu)
+            self.curvature_metric_function = get_report_curvature()
 
     def __setstate__(self, state):
         """Set the state of the optimizer for backward compatibility.
