@@ -1,7 +1,10 @@
 # Copyright 2024 MosaicML Composer authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Utility functions for optimizers and metric calculation."""
+"""Utility functions for optimizers and metric calculation.
+
+Currently handles curvature metrics shared across ADAM-like optimizers.
+"""
 
 from typing import Callable
 
@@ -11,6 +14,24 @@ from torch import Tensor
 
 def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
     """Get a function that computes curvature metrics per-parameter.
+
+    The function tracks differences in parameters and gradients between iterations, thus it allocates extra memory. To avoid interfering with training, it saves the previous parameter and gradient values for each named parameter on the cpu, and only sends them to the device when needed for calculation, for 2 H100s this causes
+    a drop in average samples per second from ~96 to ~94.
+
+    Metrics are primarily taken from AdaBB: Adaptive Barzilai-Borwein Method for Convex Optimization: https://arxiv.org/pdf/2401.08024
+    specifically equations 3,4,5 from page 2. Metrics include:
+    - param_diff_norm: L2 norm of the parameter difference between iterations
+    - grad_diff_norm: L2 norm of the gradient difference between iterations
+    - local_lipschitz: Calculated later, it is the ratio of the gradient difference norm to the parameter difference norm and estimates
+    the local Lipschitz constant. Its supposed to capture the local curvature of the loss function (https://arxiv.org/pdf/2401.08024)
+    - second_derivative_estimate: L2 norm of the elementwise ratio of gradient difference to parameter difference, recommended by a collaborator
+    - first_to_second_derivative_ratio: L2 norm of the elementwise ratio of the first derivative to the second derivative estimate, recommended by a collaborator
+    - long_bb: Barzilai-Borwein "long" step size (equation 3 from https://arxiv.org/pdf/2401.08024)
+    - short_bb: Barzilai-Borwein (https://arxiv.org/pdf/2401.08024) "short" step size (equation 4 from https://arxiv.org/pdf/2401.08024)
+
+
+
+
 
     Returns:
         Callable[[Tensor, str], dict[str, Tensor]]: A function that, given a

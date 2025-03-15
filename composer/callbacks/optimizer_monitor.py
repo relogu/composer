@@ -192,6 +192,7 @@ class OptimizerMonitor(Callback):
         only_global: bool = False,
         log_optimizer_metrics: bool = True,
         interval: Union[int, str, Time] = '10ba',
+        report_curvature: bool = True,
     ):
         self.log_optimizer_metrics = log_optimizer_metrics
         self.only_global = only_global
@@ -216,6 +217,7 @@ class OptimizerMonitor(Callback):
         if self.interval.unit not in [TimeUnit.BATCH, TimeUnit.EPOCH]:
             raise ValueError(f'Invalid time unit for parameter interval: '
                              f'{self.interval.unit}')
+        self.report_curvature = report_curvature
 
     def batch_end(self, state: State, logger: Logger):
         current_time_value = state.timestamp.get(self.interval.unit).value
@@ -286,8 +288,13 @@ class OptimizerMonitor(Callback):
             if metric.startswith('l2_norm/param'):
                 param_norm += optimizer_metrics[metric]**2
 
+        curvature_acc = {}
         # Curvature metrics
-        curvature_acc = accumulate_curvature_metrics(optimizer_metrics)
+        # trying to obtain them here
+        # has minimal cost if the optimizer
+        # does not report them
+        if self.report_curvature:
+            curvature_acc = accumulate_curvature_metrics(optimizer_metrics)
 
         if self.only_global:
             optimizer_metrics = {}
@@ -300,8 +307,9 @@ class OptimizerMonitor(Callback):
         optimizer_metrics['min/moment2/global'] = min_moment2
         optimizer_metrics['max/moment2/global'] = max_moment2
 
-        curvature_stats = finalize_curvature_metrics(curvature_acc)
-        optimizer_metrics.update(curvature_stats)
+        if self.report_curvature:
+            curvature_stats = finalize_curvature_metrics(curvature_acc)
+            optimizer_metrics.update(curvature_stats)
 
         for metric in optimizer_metrics:
             if isinstance(optimizer_metrics[metric], torch.Tensor):
