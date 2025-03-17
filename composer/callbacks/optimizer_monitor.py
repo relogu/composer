@@ -22,7 +22,7 @@ def accumulate_curvature_metrics(
         'curvature/grad_diff_norm',
         'curvature/long_bb',
         'curvature/short_bb',
-        'curvature/l2_norm/first_to_second_derivative_estimate_ratio',
+        'curvature/l2_norm/second_to_first_derivative_estimate_ratio',
         'curvature/l2_norm/second_derivative_estimate',
         'curvature/local_lipschitz',
     ),

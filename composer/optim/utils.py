@@ -25,7 +25,7 @@ def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
     - local_lipschitz: Calculated later, it is the ratio of the gradient difference norm to the parameter difference norm and estimates
     the local Lipschitz constant. Its supposed to capture the local curvature of the loss function (https://arxiv.org/pdf/2401.08024)
     - second_derivative_estimate: L2 norm of the elementwise ratio of gradient difference to parameter difference, recommended by a collaborator
-    - first_to_second_derivative_ratio: L2 norm of the elementwise ratio of the first derivative to the second derivative estimate, recommended by a collaborator
+    - second_to_first_derivative_estimate_ratio: L2 norm of the elementwise ratio of the second derivative estimate to the first derivative, recommended by a collaborator
     - long_bb: Barzilai-Borwein "long" step size (equation 3 from https://arxiv.org/pdf/2401.08024)
     - short_bb: Barzilai-Borwein (https://arxiv.org/pdf/2401.08024) "short" step size (equation 4 from https://arxiv.org/pdf/2401.08024)
 
@@ -71,7 +71,7 @@ def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
         second_derivative_estimate = grad_diff / param_diff
 
         # Ratio of first to second derivative
-        first_to_second_derivative_ratio = torch.linalg.vector_norm(param.grad / second_derivative_estimate,)
+        second_to_first_derivative_ratio = torch.linalg.vector_norm(second_derivative_estimate / param.grad)
 
         # Update stored values for next iteration
         prev_params[name] = param.detach().clone().cpu()
@@ -86,8 +86,8 @@ def get_report_curvature() -> Callable[[Tensor, str], dict[str, Tensor]]:
                 long_bb,
             f'curvature/short_bb/{name}':
                 short_bb,
-            f'curvature/l2_norm/first_to_second_derivative_estimate_ratio/{name}':
-                first_to_second_derivative_ratio,
+            f'curvature/l2_norm/second_to_first_derivative_estimate_ratio/{name}':
+                second_to_first_derivative_ratio,
             f'curvature/l2_norm/second_derivative_estimate/{name}':
                 torch.linalg.vector_norm(second_derivative_estimate),
         }
