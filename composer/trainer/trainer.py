@@ -1773,7 +1773,7 @@ class Trainer:
                     log.debug(f'Created object store from load path: {load_object_store}')
                 if isinstance(load_object_store, WandBLogger):
                     import wandb
-                    if wandb.run is None:
+                    if wandb.run is None:  # type: ignore[reportGeneralTypeIssues]
                         load_object_store.init(self.state, self.logger)
                 _, _, parsed_load_path = parse_uri(load_path)
                 log.debug(f'Parsed load path: {parsed_load_path}')

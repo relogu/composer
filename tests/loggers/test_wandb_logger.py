@@ -393,7 +393,7 @@ def test_wandb_artifacts(monkeypatch: MonkeyPatch, rank_zero_only: bool, tmp_pat
     def mock_artifact(*arg, **kwargs):
         return MockArtifact(dummy_wandb_artifact_path)
 
-    monkeypatch.setattr(wandb.Api, 'artifact', mock_artifact)
+    monkeypatch.setattr(wandb.Api, 'artifact', mock_artifact)  # type: ignore[reportGeneralTypeIssues]
 
     def _validate_wandb_artifact():
         wandb_logger.download_file(wandb_artifact_name, str(downloaded_wandb_artifact_path))

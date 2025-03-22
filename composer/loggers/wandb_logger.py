@@ -126,7 +126,7 @@ class WandBLogger(LoggerDestination):
             import wandb
 
             # NOTE: Allow val change is set to True to allow for hyperparameter logging when resuming a run.
-            wandb.config.update(hyperparameters, allow_val_change=True)
+            wandb.config.update(hyperparameters, allow_val_change=True)  # type: ignore[reportGeneralTypeIssues]
 
     def log_table(
         self,
@@ -137,8 +137,8 @@ class WandBLogger(LoggerDestination):
     ) -> None:
         if self._enabled:
             import wandb
-            table = wandb.Table(columns=columns, rows=rows)
-            wandb.log({name: table}, step=step)
+            table = wandb.Table(columns=columns, rows=rows)  # type: ignore[reportGeneralTypeIssues]
+            wandb.log({name: table}, step=step)  # type: ignore[reportGeneralTypeIssues]
 
     def log_metrics(self, metrics: dict[str, Any], step: Optional[int] = None) -> None:
         if self._enabled:
@@ -147,7 +147,7 @@ class WandBLogger(LoggerDestination):
             # wandb.log alters the metrics dictionary object, so we deepcopy to avoid
             # side effects.
             metrics_copy = copy.deepcopy(metrics)
-            wandb.log(metrics_copy, step)
+            wandb.log(metrics_copy, step)  # type: ignore[reportGeneralTypeIssues]
 
     def log_images(
         self,
@@ -176,19 +176,24 @@ class WandBLogger(LoggerDestination):
                     channels_last=channels_last,
                 )
                 wandb_images = (
-                    wandb.Image(im, masks=mask_dict) for im, mask_dict in zip(images_generator, wandb_masks_generator)
+                    wandb.Image(  # type: ignore[reportGeneralTypeIssues]
+                        im, masks=mask_dict,
+                    ) for im, mask_dict in zip(images_generator, wandb_masks_generator)
                 )
 
             else:
-                wandb_images = (wandb.Image(image) for image in images_generator)
+                wandb_images = (
+                    wandb.Image(image)  # type: ignore[reportGeneralTypeIssues]
+                    for image in images_generator
+                )
 
             if use_table:
-                table = wandb.Table(columns=[name])
+                table = wandb.Table(columns=[name])  # type: ignore[reportGeneralTypeIssues]
                 for wandb_image in wandb_images:
                     table.add_data(wandb_image)
-                wandb.log({name + ' Table': table}, step=step)
+                wandb.log({name + ' Table': table}, step=step)  # type: ignore[reportGeneralTypeIssues]
             else:
-                wandb.log({name: list(wandb_images)}, step=step)
+                wandb.log({name: list(wandb_images)}, step=step)  # type: ignore[reportGeneralTypeIssues]
 
     def init(self, state: State, logger: Logger) -> None:
         import wandb
@@ -206,20 +211,23 @@ class WandBLogger(LoggerDestination):
         if self._enabled:
             # Load the configuration from the config file
             original_cfg = OmegaConf.load(self._config_file) if self._config_file is not None else None
-            wandb.init(
+            wandb.init(  # type: ignore[reportGeneralTypeIssues]
                 **self._init_kwargs,
-                settings=wandb.Settings(start_method='thread'),
+                settings=wandb.Settings(start_method='thread'),  # type: ignore[reportGeneralTypeIssues]
                 config=cast(dict[Any, Any], OmegaConf.to_container(original_cfg, resolve=True, throw_on_missing=True))
                 if original_cfg else None,
             )
-            assert wandb.run is not None, 'The wandb run is set after init'
-            if hasattr(wandb.run, 'entity') and hasattr(wandb.run, 'project'):
-                entity_and_project = [str(wandb.run.entity), str(wandb.run.project)]
+            assert wandb.run is not None, 'The wandb run is set after init'  # type: ignore[reportGeneralTypeIssues]
+            if hasattr(wandb.run, 'entity') and hasattr(wandb.run, 'project'):  # type: ignore[reportGeneralTypeIssues]
+                entity_and_project = [
+                    str(wandb.run.entity),  # type: ignore[reportGeneralTypeIssues]
+                    str(wandb.run.project),  # type: ignore[reportGeneralTypeIssues]
+                ]
             else:
                 # Run does not have attribtues if wandb is in disabled mode, so we must mock it
                 entity_and_project = ['disabled', 'disabled']
-            self.run_dir = wandb.run.dir
-            self.run_url = wandb.run.get_url()
+            self.run_dir = wandb.run.dir  # type: ignore[reportGeneralTypeIssues]
+            self.run_url = wandb.run.get_url()  # type: ignore[reportGeneralTypeIssues]
             atexit.register(self._set_is_in_atexit)
         else:
             entity_and_project = [None, None]
@@ -261,13 +269,13 @@ class WandBLogger(LoggerDestination):
             if extension == 'pt':
                 extension = 'model'
 
-            wandb_artifact = wandb.Artifact(
+            wandb_artifact = wandb.Artifact(  # type: ignore[reportGeneralTypeIssues]
                 name=new_remote_file_name,
                 type=extension,
                 metadata=metadata,
             )
             wandb_artifact.add_file(os.path.abspath(file_path))
-            wandb.log_artifact(wandb_artifact, aliases=aliases)
+            wandb.log_artifact(wandb_artifact, aliases=aliases)  # type: ignore[reportGeneralTypeIssues]
 
     def can_upload_files(self) -> bool:
         """Whether the logger supports uploading files."""
@@ -287,7 +295,7 @@ class WandBLogger(LoggerDestination):
 
         # using the wandb.Api() to support retrieving artifacts on ranks where
         # artifacts are not initialized
-        api = wandb.Api()
+        api = wandb.Api()  # type: ignore[reportGeneralTypeIssues]
         if not self.entity or not self.project:
             raise RuntimeError('get_file_artifact can only be called after running init()')
 
@@ -327,7 +335,7 @@ class WandBLogger(LoggerDestination):
         import wandb
 
         # Cleaning up on post_close so all artifacts are uploaded
-        if not self._enabled or wandb.run is None or self._is_in_atexit:
+        if not self._enabled or wandb.run is None or self._is_in_atexit:  # type: ignore[reportGeneralTypeIssues]
             # Don't call wandb.finish if there is no run, or
             # the script is in an atexit, since wandb also hooks into atexit
             # and it will error if wandb.finish is called from the Composer atexit hook
@@ -337,10 +345,10 @@ class WandBLogger(LoggerDestination):
         exc_tpe, exc_info, tb = sys.exc_info()
 
         if (exc_tpe, exc_info, tb) == (None, None, None):
-            wandb.finish(0)
+            wandb.finish(0)  # type: ignore[reportGeneralTypeIssues]
         else:
             # record there was an error
-            wandb.finish(1)
+            wandb.finish(1)  # type: ignore[reportGeneralTypeIssues]
 
 
 def _convert_to_wandb_image(image: Union[np.ndarray, torch.Tensor], channels_last: bool) -> np.ndarray:

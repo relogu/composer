@@ -80,8 +80,8 @@ install_requires = [
     'tqdm>=4.62.3,<5',
     'torchmetrics>=1.0,<1.6.1',
     'torch_optimizer>=0.3.0,<0.4',
-    'torchvision>=0.18.0,<0.20.2',
-    'torch>=2.3.0,<2.5.2',
+    'torchvision>=0.19.0,<0.21.1',
+    'torch>=2.4.0,<2.6.1',
     'requests>=2.26.0,<3',
     'numpy>=1.21.5,<2.2.0',
     'psutil>=5.8.0,<7',
@@ -143,6 +143,7 @@ extra_deps['dev'] = [
     'cryptography==44.0.0',
     'pytest-httpserver>=1.0.4,<1.1',
     'setuptools<=59.5.0',
+    'scikit-learn>=1.2.0,<1.6',
 ]
 
 extra_deps['system_metrics_monitor'] = {
@@ -219,13 +220,13 @@ extra_deps['onnx'] = [
 
 extra_deps['mlflow'] = [
     'mlflow>=2.14.1,<3.0',
-    'databricks-sdk==0.38.0',
+    'databricks-sdk==0.44.1',
     'pynvml>=11.5.0,<12',
 ]
 
 extra_deps['pandas'] = ['pandas>=2.0.0,<3.0']
 
-extra_deps['databricks'] = ['databricks-sdk==0.38.0']
+extra_deps['databricks'] = ['databricks-sdk==0.44.1']
 
 extra_deps['all'] = {dep for deps in extra_deps.values() for dep in deps}
 
