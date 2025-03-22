@@ -13,6 +13,7 @@ schedulers based off of Composer's :class:`~.scheduler.ComposerScheduler` API, w
 configuration in writing schedulers.
 """
 
+from composer.optim.adopt import ADOPT
 from composer.optim.decoupled_weight_decay import DecoupledAdamW, DecoupledSGDW
 from composer.optim.scheduler import (
     ComposerScheduler,
@@ -35,6 +36,7 @@ from composer.optim.scheduler import (
 )
 
 __all__ = [
+    'ADOPT',
     'DecoupledAdamW',
     'DecoupledSGDW',
     'ComposerScheduler',

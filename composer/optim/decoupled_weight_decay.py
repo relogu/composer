@@ -421,8 +421,11 @@ class DecoupledAdamW(AdamW):
             denom = (param_optim_state['exp_avg_sq'].sqrt() / math.sqrt(bias_correction2)).add_(eps)
             step_size = lr / bias_correction1
             step_tensor = step_size * param_optim_state['exp_avg'].div(denom)
-            decay_factor = (lr / initial_lr) if initial_lr else 1.0
-            step_tensor.add_(param, alpha=-weight_decay * decay_factor)
+            # NOTE: This is inverting the AdamW update step to get the actual update step. The original implementation was wrong
+            if weight_decay != 0:
+                decay_factor = (lr / initial_lr) if initial_lr else 1.0
+                scaling_factor = (decay_factor * weight_decay) / (1 - decay_factor * weight_decay)
+                step_tensor.mul_(1 + scaling_factor).add_(param, alpha=scaling_factor)
             for metric in self.metric_functions:
                 optimizer_metrics[f'{metric}/{name}'] = self.metric_functions[metric](
                     param,
