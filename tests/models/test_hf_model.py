@@ -1322,8 +1322,8 @@ def test_peft_init(peft_type: str, task_type: str, tiny_gpt2_model, gpt2_peft_co
 
     hf_model = HuggingFaceModel(tiny_gpt2_model, peft_config=peft_config)
     assert isinstance(hf_model.model, PeftModelForCausalLM)
-    assert hf_model.model.peft_config['default'].peft_type == 'LORA'
-    assert hf_model.model.peft_config['default'].task_type == 'CAUSAL_LM'
+    assert hf_model.model.peft_config['default'].peft_type == 'LORA'  # type: ignore[reportGeneralTypeIssues]
+    assert hf_model.model.peft_config['default'].task_type == 'CAUSAL_LM'  # type: ignore[reportGeneralTypeIssues]
     assert hf_model.model.config == original_model.config
 
 

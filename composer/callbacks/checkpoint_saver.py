@@ -609,7 +609,10 @@ class CheckpointSaver(Callback):  # noqa: D101
                     pass
             else:
                 if dist.get_global_rank() == 0:
-                    shutil.rmtree(prefix_dir)
+                    try:
+                        shutil.rmtree(prefix_dir)
+                    except FileNotFoundError:
+                        pass
 
     def _log_checkpoint_upload(self, logger: Logger):
         for destination in logger.destinations:

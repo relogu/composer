@@ -119,9 +119,9 @@ def test_fsdp_optimizer_monitor_transformer(device, world_size, tiny_gpt2_model,
     grad_monitor = OptimizerMonitor(log_optimizer_metrics=True)
     in_memory_logger = InMemoryLogger()  # track the logged metrics in the in_memory_logger
     model = HuggingFaceModel(model=tiny_gpt2_model, tokenizer=tiny_gpt2_tokenizer, use_logits=True)
-    model.model.lm_head._fsdp_wrap = False
-    model.model.transformer._fsdp_wrap = False
-    for block in model.model.transformer.h:
+    model.model.lm_head._fsdp_wrap = False  # type: ignore[reportGeneralTypeIssues]
+    model.model.transformer._fsdp_wrap = False  # type: ignore[reportGeneralTypeIssues]
+    for block in model.model.transformer.h:  # type: ignore[reportGeneralTypeIssues]
         block._fsdp_wrap = True
     train_dataset = RandomTextLMDataset(
         size=8,

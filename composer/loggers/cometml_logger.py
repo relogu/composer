@@ -236,7 +236,7 @@ def _convert_to_comet_image(image: Union[np.ndarray, torch.Tensor]) -> torch.Ten
             ),
         )
 
-    return image
+    return image  # type: ignore[reportGeneralTypeIssues]
 
 
 def _convert_to_comet_mask(mask: Union[np.ndarray, torch.Tensor]):

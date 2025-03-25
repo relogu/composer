@@ -129,7 +129,11 @@ def finetuning_test_helper(tokenizer, model, algorithms, checkpoint_path, pretra
     finetuning_embedding_layer = get_model_embeddings(model)
     pretraining_embedding_layer = get_model_embeddings(pretraining_model)
     # The pretraining weights have not yet been loaded into the finetuning model
-    assert not torch.equal(finetuning_embedding_layer.cpu(), pretraining_embedding_layer.cpu())
+    assert not torch.equal(
+        finetuning_embedding_layer.cpu(),  # type: ignore[reportGeneralTypeIssues]
+        pretraining_embedding_layer.cpu(),  # type: ignore[reportGeneralTypeIssues]
+    )
+
     finetuning_trainer = Trainer(
         model=model,
         train_dataloader=finetuning_train_dataloader,
@@ -144,7 +148,11 @@ def finetuning_test_helper(tokenizer, model, algorithms, checkpoint_path, pretra
         device=device,
     )
     # Now they have been loaded
-    assert torch.equal(finetuning_embedding_layer.cpu(), pretraining_embedding_layer.cpu())
+    assert torch.equal(
+        finetuning_embedding_layer.cpu(),  # type: ignore[reportGeneralTypeIssues]
+        pretraining_embedding_layer.cpu(),  # type: ignore[reportGeneralTypeIssues]
+    )
+
     finetuning_trainer.fit()
     finetuning_trainer.eval(finetuning_eval_dataloader)
 

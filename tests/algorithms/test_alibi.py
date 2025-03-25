@@ -222,7 +222,12 @@ class TestAlibi:
         alibi.apply(Event.AFTER_DATALOADER, state, empty_logger)
 
         # Ensure proper batch reshaping
-        check_batch_reshaping(batch_before, state.batch, int(train_sequence_length_scaling * max_sequence_length))
-
+        check_batch_reshaping(
+            batch_before,
+            state.batch,
+            int(
+                train_sequence_length_scaling * max_sequence_length,  # type: ignore[reportGeneralTypeIssues]
+            ),
+        )
         # Ensure that the model runs forwards/backwards
         check_forward_backward(state.model, state.batch)

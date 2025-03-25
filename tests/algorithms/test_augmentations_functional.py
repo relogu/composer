@@ -50,7 +50,7 @@ def img_dtype(request) -> torch.dtype:
 @pytest.mark.parametrize('f_aug', [colout_batch, cutout_batch, augmix_image, randaugment_image])
 def test_batch_augmentation_funcs_preserve_type(img_type: str, img_dtype: torch.dtype, f_aug: InputAugFunction):
     img, out = _input_output_pair(img_type, img_dtype, f_aug)
-    assert type(out) == type(img)
+    assert type(out) == type(img)  # type: ignore[reportGeneralTypeIssues]
 
 
 @pytest.mark.parametrize('img_type', ['pillow', 'single_tensor', 'batch_tensor'])

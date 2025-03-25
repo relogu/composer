@@ -24,7 +24,7 @@ def _find_box(img_2d: torch.Tensor) -> torch.Tensor:
 
     # Find the box
     # First create h x w filter populated with ones where it thinks there's a box, then find coordinates of ones
-    filter_box = torch.where(img_2d == 0, ones, zeros)
+    filter_box = torch.where(img_2d == 0, ones, zeros)  # type: ignore[reportGeneralTypeIssues]
     box_x, box_y = torch.nonzero(filter_box, as_tuple=True)  # Find all points where filter_box is 1
 
     # Check for no box found

@@ -212,7 +212,8 @@ class HuggingFaceModel(ComposerModel):
             assert isinstance(active_adapter, str)
             full_state_dict = filter_state_dict_peft(
                 full_state_dict,
-                self.model.peft_config[active_adapter],
+                self.model.peft_config[active_adapter],  # type: ignore[reportGeneralTypeIssues]
+
                 adapter_name='default',
                 remove_adapter_names=False,
             )
@@ -618,7 +619,10 @@ class HuggingFaceModel(ComposerModel):
             if self.using_peft:
                 active_adapter = self.model.active_adapter
                 assert isinstance(active_adapter, str)
-                self.model.peft_config[active_adapter].save_pretrained(str(model_dir))
+                self.model.peft_config[active_adapter].save_pretrained(  # type: ignore[reportGeneralTypeIssues]
+                    str(model_dir),
+                )
+
                 with open(model_dir / 'adapter_config.json') as _peft_config_file:
                     peft_config = json.load(_peft_config_file)
 

@@ -102,14 +102,18 @@ class Dice(Metric):
         num_classes = preds.shape[1]
         scores = torch.zeros(num_classes - 1, device=preds.device, dtype=torch.float32)
         for i in range(1, num_classes):
-            if (targets != i).all():
+            if (targets != i).all():  # type: ignore[reportGeneralTypeIssues]
+
                 # no foreground class
-                _, _pred = torch.max(preds, 1)
-                scores[i - 1] += 1 if (_pred != i).all() else 0
+                _, _pred = torch.max(preds, 1)  # type: ignore[reportGeneralTypeIssues]
+
+                scores[i - 1] += 1 if (_pred != i).all() else 0  # type: ignore[reportGeneralTypeIssues]
                 continue
             _tp, _fp, _tn, _fn, _ = _stat_scores(preds, targets, class_index=i)  # type: ignore
-            denom = (2 * _tp + _fp + _fn).to(torch.float)
-            score_cls = (2 * _tp).to(torch.float) / denom if torch.is_nonzero(denom) else 0.0
+            denom = (2 * _tp + _fp + _fn).to(torch.float)  # type: ignore[reportGeneralTypeIssues]
+            score_cls = (2 * _tp).to(  # type: ignore[reportGeneralTypeIssues]
+                torch.float,
+            ) / denom if torch.is_nonzero(denom) else 0.0
             scores[i - 1] += score_cls
         return scores
 
@@ -124,11 +128,23 @@ def _stat_scores(
     if preds.ndim == targets.ndim + 1:
         preds = to_categorical(preds, argmax_dim=argmax_dim)
 
-    tp = ((preds == class_index) * (targets == class_index)).to(torch.long).sum()
-    fp = ((preds == class_index) * (targets != class_index)).to(torch.long).sum()
-    tn = ((preds != class_index) * (targets != class_index)).to(torch.long).sum()
-    fn = ((preds != class_index) * (targets == class_index)).to(torch.long).sum()
-    sup = (targets == class_index).to(torch.long).sum()
+    tp = ((preds == class_index) * (targets == class_index)).to(  # type: ignore[reportGeneralTypeIssues]
+        torch.long,
+    ).sum()
+
+    fp = ((preds == class_index) * (targets != class_index)).to(  # type: ignore[reportGeneralTypeIssues]
+        torch.long,
+    ).sum()
+
+    tn = ((preds != class_index) * (targets != class_index)).to(  # type: ignore[reportGeneralTypeIssues]
+        torch.long,
+    ).sum()
+
+    fn = ((preds != class_index) * (targets == class_index)).to(  # type: ignore[reportGeneralTypeIssues]
+        torch.long,
+    ).sum()
+
+    sup = (targets == class_index).to(torch.long).sum()  # type: ignore[reportGeneralTypeIssues]
 
     return tp, fp, tn, fn, sup
 

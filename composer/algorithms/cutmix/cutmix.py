@@ -295,7 +295,9 @@ class CutMix(Algorithm):
                 raise NotImplementedError('Multiple losses not supported yet')
             if not isinstance(new_loss, torch.Tensor):
                 raise NotImplementedError('Multiple losses not supported yet')
-            state.loss = self._adjusted_lambda * state.loss + (1 - self._adjusted_lambda) * new_loss
+            state.loss = self._adjusted_lambda * state.loss + (
+                1 - self._adjusted_lambda
+            ) * new_loss  # type: ignore[reportGeneralTypeIssues]
 
 
 def _gen_indices(x: Tensor) -> Tensor:

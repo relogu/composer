@@ -269,8 +269,8 @@ def test_get_optim_state_dict_unsharded_model(use_composer_model: bool):
             param = param_dict[param_key]
         else:
             param = params[param_key]
-        assert param.shape == param_state['exp_avg'].shape
-        assert param.shape == param_state['exp_avg_sq'].shape
+        assert param.shape == param_state['exp_avg'].shape  # type: ignore[reportGeneralTypeIssues]
+        assert param.shape == param_state['exp_avg_sq'].shape  # type: ignore[reportGeneralTypeIssues]
 
     # Make sure param groups between the state dict and the optimizer object are the same.
     for osd_group, opt_group in zip(optim_state_dict['param_groups'], optimizer.param_groups):

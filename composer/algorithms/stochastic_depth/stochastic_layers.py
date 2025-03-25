@@ -61,7 +61,7 @@ def _sample_drop(x: torch.Tensor, sample_drop_rate: float, is_training: bool):
         return x * keep_probability
     rand_dim = [x.shape[0]] + [1] * len(x.shape[1:])
     sample_mask = keep_probability + torch.rand(rand_dim, dtype=x.dtype, device=x.device)
-    sample_mask.floor_()  # binarize
+    sample_mask.floor_()  # type: ignore[reportGeneralTypeIssues]
     x *= sample_mask
     return x
 
@@ -134,7 +134,9 @@ class BlockStochasticModule(nn.Module):
         self.residual = residual
 
     def forward(self, x):
-        sample = (not self.training) or bool(torch.bernoulli(1 - self.drop_rate))
+        sample = (not self.training) or bool(
+            torch.bernoulli(1 - self.drop_rate),  # type: ignore[reportGeneralTypeIssues]
+        )
         # main side is the non-residual connection
         residual_result = x
         # residual side may or may not have any operations

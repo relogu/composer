@@ -1022,7 +1022,7 @@ class TestTrainerInitOrFit:
             dtype=torch.float64,
         )
         dist.broadcast(rank_zero_timestamp_tensor, src=0)
-        assert torch.all(my_timestamp_tensor == rank_zero_timestamp_tensor)
+        assert torch.all(my_timestamp_tensor == rank_zero_timestamp_tensor)  # type: ignore[reportGeneralTypeIssues]
 
     @pytest.mark.parametrize('unit', [TimeUnit.EPOCH, TimeUnit.BATCH, TimeUnit.SAMPLE])
     def test_training_duration_unit(

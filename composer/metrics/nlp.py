@@ -57,7 +57,7 @@ class MaskedAccuracy(Metric):
         assert isinstance(self.correct, Tensor)
         assert isinstance(self.total, Tensor)
         self.correct += torch.sum(masked_preds == masked_target)
-        self.total += mask.sum()
+        self.total += mask.sum()  # type: ignore[reportGeneralTypeIssues]
 
     def compute(self):
         assert isinstance(self.correct, Tensor)
@@ -108,7 +108,8 @@ class LanguageCrossEntropy(Metric):
         logits = logits.view(target.shape[0], -1)
         losses = self.loss_fn(logits, target)
 
-        total_items = (target != self.ignore_index).sum()
+        total_items = (target != self.ignore_index).sum()  # type: ignore[reportGeneralTypeIssues]
+
         self.total_items += total_items  #type: ignore (third-party)
 
         # accumulate loss over all batches

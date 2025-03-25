@@ -56,7 +56,7 @@ def ensure_targets_one_hot(
             num_classes = input.shape[1]
 
         # Convert to one-hot tensor
-        targets = _one_hot(targets, num_classes=num_classes, dim=1)
+        targets = _one_hot(targets, num_classes=num_classes, dim=1)  # type: ignore[reportGeneralTypeIssues]
     return targets.float()
 
 

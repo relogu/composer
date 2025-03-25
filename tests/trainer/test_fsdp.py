@@ -144,9 +144,9 @@ def test_fsdp_inits_params_once(model: ComposerClassifier, device: str, world_si
     # Check that the parameters were initialized correctly
     for module in model.modules():
         if isinstance(module, torch.nn.Linear):
-            assert torch.all(module.weight == 1)
+            assert torch.all(module.weight == 1)  # type: ignore[reportGeneralTypeIssues]
             if module.bias is not None:  # pyright: ignore[reportUnnecessaryComparison]
-                assert torch.all(module.bias == 2)
+                assert torch.all(module.bias == 2)  # type: ignore[reportGeneralTypeIssues]
 
 
 @pytest.mark.parametrize('model', [SimpleModel])
