@@ -289,7 +289,8 @@ class CheckpointSaver(Callback):  # noqa: D101
                 get_compressor(name).check_exists()
 
         if not callable(save_interval):
-            save_interval = create_interval_scheduler(save_interval)
+            # NOTE: We DON'T WANT TO INCLUDE THE BLOODY END OF TRAINING. We are smart and we can set the save_interval accordingly.
+            save_interval = create_interval_scheduler(save_interval, include_end_of_training=False)
         self.save_interval = save_interval
         self.last_checkpoint_batch: Optional[Time] = None
 
