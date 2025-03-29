@@ -23,7 +23,7 @@ from composer.callbacks.nan_monitor import NaNMonitor
 from composer.callbacks.noise_scale_monitor import NoiseScaleMonitor
 from composer.callbacks.oom_observer import OOMObserver
 from composer.callbacks.optimizer_monitor import OptimizerMonitor
-from composer.callbacks.quasi_hyperbolic_monitor import QuasiHyperbolicMonitor
+from composer.callbacks.quasi_hyperbolic_parameter_monitor import QuasiHyperbolicParameterMonitor
 from composer.callbacks.runtime_estimator import RuntimeEstimator
 from composer.callbacks.speed_monitor import SpeedMonitor
 from composer.callbacks.system_metrics_monitor import SystemMetricsMonitor
@@ -35,7 +35,7 @@ __all__ = [
     'NoiseScaleMonitor',
     'LRMonitor',
     'BetasMonitor',
-    'QuasiHyperbolicMonitor',
+    'QuasiHyperbolicParameterMonitor',
     'MemoryMonitor',
     'NaNMonitor',
     'SpeedMonitor',

@@ -6,10 +6,10 @@
 from composer.core import Callback, State
 from composer.loggers import Logger
 
-__all__ = ['QuasiHyperbolicMonitor']
+__all__ = ['QuasiHyperbolicParameterMonitor']
 
 
-class QuasiHyperbolicMonitor(Callback):
+class QuasiHyperbolicParameterMonitor(Callback):
     """Logs hyperbolic v1 parameter.
 
     This callback iterates over all optimizers and their parameter groups to log v1 under the ``v1-{OPTIMIZER_NAME}/group{GROUP_NUMBER}`` key.
