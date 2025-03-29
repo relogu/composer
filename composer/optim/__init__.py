@@ -15,6 +15,7 @@ configuration in writing schedulers.
 
 from composer.optim.adopt import ADOPT
 from composer.optim.decoupled_weight_decay import DecoupledAdamW, DecoupledSGDW
+from composer.optim.qhadopt import QHADOPT
 from composer.optim.scheduler import (
     ComposerScheduler,
     ConstantScheduler,
@@ -37,6 +38,7 @@ from composer.optim.scheduler import (
 
 __all__ = [
     'ADOPT',
+    'QHADOPT',
     'DecoupledAdamW',
     'DecoupledSGDW',
     'ComposerScheduler',

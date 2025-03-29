@@ -7,6 +7,7 @@ Each callback inherits from the :class:`.Callback` base class. See detailed desc
 examples for writing your own callbacks at the :class:`.Callback` base class.
 """
 from composer.callbacks.activation_monitor import ActivationMonitor
+from composer.callbacks.betas_monitor import BetasMonitor
 from composer.callbacks.checkpoint_saver import CheckpointSaver
 from composer.callbacks.early_stopper import EarlyStopper
 from composer.callbacks.export_for_inference import ExportForInferenceCallback
@@ -22,6 +23,7 @@ from composer.callbacks.nan_monitor import NaNMonitor
 from composer.callbacks.noise_scale_monitor import NoiseScaleMonitor
 from composer.callbacks.oom_observer import OOMObserver
 from composer.callbacks.optimizer_monitor import OptimizerMonitor
+from composer.callbacks.quasi_hyperbolic_parameter_monitor import QuasiHyperbolicParameterMonitor
 from composer.callbacks.runtime_estimator import RuntimeEstimator
 from composer.callbacks.speed_monitor import SpeedMonitor
 from composer.callbacks.system_metrics_monitor import SystemMetricsMonitor
@@ -32,6 +34,8 @@ __all__ = [
     'OptimizerMonitor',
     'NoiseScaleMonitor',
     'LRMonitor',
+    'BetasMonitor',
+    'QuasiHyperbolicParameterMonitor',
     'MemoryMonitor',
     'NaNMonitor',
     'SpeedMonitor',
