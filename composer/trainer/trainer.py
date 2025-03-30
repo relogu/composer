@@ -1006,6 +1006,9 @@ class Trainer:
         ddp_sync_strategy (str | DDPSyncStrategy, optional): The strategy to use for synchronizing gradients.
             Leave unset to let the trainer auto-configure this. See :class:`.DDPSyncStrategy`
             for more details.
+        find_unused_parameters (bool, optional): Whether or not to do a pass over the autograd graph
+            to find parameters to not expect gradients for. This is useful if there are some
+            parameters in the model that are not being trained.
         profiler (Profiler, optional): The profiler, if profiling should be enabled. (default: ``None``)
 
             .. seealso::
@@ -1123,6 +1126,7 @@ class Trainer:
         # Distributed Training
         dist_timeout: float = 300.0,
         ddp_sync_strategy: Optional[Union[str, DDPSyncStrategy]] = None,
+        find_unused_parameters: Optional[bool] = None,
 
         # Profiling
         profiler: Optional[Profiler] = None,
@@ -1622,7 +1626,9 @@ class Trainer:
 
         # Some algorithms require specific settings
         self._backwards_create_graph = any((x.backwards_create_graph for x in self.state.algorithms))
-        self._find_unused_parameters = any((x.find_unused_parameters for x in self.state.algorithms))
+        self._find_unused_parameters = find_unused_parameters or any(
+            (x.find_unused_parameters for x in self.state.algorithms),
+        )
         self._ddp_sync_strategy = _get_ddp_sync_strategy(ddp_sync_strategy, self._find_unused_parameters)
 
         # Suppressing GradScaler warnings as they are always created
