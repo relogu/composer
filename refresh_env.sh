@@ -1,7 +1,7 @@
 #!/usr/bin/env -i bash
 eval "$(grep -vFx '[ -z "$PS1" ] && return' ~/.bashrc)"
 LIBRARY_NAME="composer"
-PYTHON_VERSION="3.11.12"
+PYTHON_VERSION="3.12.10"
 pyenv virtualenv-delete $LIBRARY_NAME
 pyenv shell $PYTHON_VERSION
 python -m pip install --upgrade pip
