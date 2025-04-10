@@ -72,8 +72,7 @@ while True:
         break
     else:
         assert end != -1, 'there should be a balanced number of start and ends'
-        long_description = long_description[:start] + \
-            long_description[end + len(end_tag):]
+        long_description = long_description[:start] + long_description[end + len(end_tag):]
 
 install_requires = [
     'pyyaml>=6.0,<7',
@@ -90,7 +89,7 @@ install_requires = [
     'py-cpuinfo>=8.0.0,<10',
     'packaging>=21.3.0,<24.3',
     'importlib-metadata>=5.0.0,<9',
-    'mosaicml-cli>=0.5.25,<0.7',
+    'mosaicml-cli>=0.5.25,<0.8',
     'pillow>=10.3.0,<12',
 ]
 extra_deps = {}
@@ -137,13 +136,13 @@ extra_deps['dev'] = [
     'nbsphinx==0.9.1',
     'pandoc==2.4',
     'pypandoc==1.14',
-    'GitPython==3.1.43',
+    'GitPython==3.1.44',
     'moto[s3]>=5.0.1,<6',
     'mock-ssh-server==0.9.1',
     'cryptography==44.0.0',
-    'pytest-httpserver>=1.0.4,<1.1',
-    'setuptools<=59.5.0',
-    'scikit-learn>=1.2.0,<1.6',
+    'pytest-httpserver>=1.0.4,<1.2',
+    'setuptools==78.0.2',
+    'scikit-learn>=1.2.0,<1.7',
 ]
 
 extra_deps['system_metrics_monitor'] = {
@@ -175,9 +174,9 @@ extra_deps['coco'] = [
 ]
 
 extra_deps['nlp'] = [
-    'transformers>=4.11,!=4.34.0,<4.46',
+    'transformers>=4.11,!=4.34.0,<4.51',
     'datasets>=2.4,<4',
-    'huggingface-hub>=0.21.2,<0.27',
+    'huggingface-hub>=0.21.2,<0.30',
 ]
 
 extra_deps['peft'] = [
@@ -220,13 +219,13 @@ extra_deps['onnx'] = [
 
 extra_deps['mlflow'] = [
     'mlflow>=2.14.1,<3.0',
-    'databricks-sdk==0.44.1',
+    'databricks-sdk==0.47.0',
     'pynvml>=11.5.0,<12',
 ]
 
 extra_deps['pandas'] = ['pandas>=2.0.0,<3.0']
 
-extra_deps['databricks'] = ['databricks-sdk==0.44.1']
+extra_deps['databricks'] = ['databricks-sdk==0.47.0']
 
 extra_deps['all'] = {dep for deps in extra_deps.values() for dep in deps}
 
@@ -258,9 +257,9 @@ setup(
     packages=setuptools.find_packages(exclude=['docker*', 'examples*', 'scripts*', 'tests*']),
     classifiers=[
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
     install_requires=install_requires,
     entry_points={
@@ -272,7 +271,7 @@ setup(
     },
     extras_require=extra_deps,
     dependency_links=['https://developer.download.nvidia.com/compute/redist'],
-    python_requires='>=3.9',
+    python_requires='>=3.10',
     ext_package='composer',
     cmdclass={'develop': develop},
 )

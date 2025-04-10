@@ -146,7 +146,7 @@ def _session_tiny_bert_model(_session_tiny_bert_config):  # type: ignore
 def tiny_bert_tokenizer_helper():
     transformers = pytest.importorskip('transformers')
 
-    return transformers.AutoTokenizer.from_pretrained('google-bert/bert-base-uncased')
+    return transformers.AutoTokenizer.from_pretrained('google-bert/bert-base-uncased', model_max_length=128)
 
 
 @pytest.fixture(scope='session')
@@ -161,6 +161,7 @@ def tiny_bert_config_helper():
         'num_attention_heads': 2,
         'num_hidden_layers': 2,
         'intermediate_size': 512,
+        'attn_implementation': 'eager',
     }
     return transformers.AutoConfig.from_pretrained('google-bert/bert-base-uncased', **tiny_overrides)
 
@@ -245,57 +246,9 @@ def tiny_gpt2_tokenizer_helper():
     return hf_tokenizer
 
 
-def tiny_llama_tokenizer_helper():
-    transformers = pytest.importorskip('transformers')
-
-    hf_tokenizer = transformers.AutoTokenizer.from_pretrained('huggyllama/llama-7b', use_fast=False)
-    return hf_tokenizer
-
-
 @pytest.fixture(scope='session')
 def _session_tiny_gpt2_tokenizer():  # type: ignore
     return tiny_gpt2_tokenizer_helper()
-
-
-@pytest.fixture(scope='session')
-def _session_tiny_llama_tokenizer():  # type: ignore
-    return tiny_llama_tokenizer_helper()
-
-
-def tiny_opt_model_helper(config):
-    transformers = pytest.importorskip('transformers')
-
-    return transformers.AutoModelForCausalLM.from_config(config)
-
-
-@pytest.fixture(scope='session')
-def _session_tiny_opt_model(_session_tiny_opt_config):  # type: ignore
-    return tiny_opt_model_helper(_session_tiny_opt_config)
-
-
-def tiny_opt_config_helper():
-    transformers = pytest.importorskip('transformers')
-
-    tiny_overrides = {'n_embd': 2, 'n_head': 2, 'n_layer': 2, 'vocab_size': 50272}
-    return transformers.AutoConfig.from_pretrained('facebook/opt-125m', **tiny_overrides)
-
-
-@pytest.fixture(scope='session')
-def _session_tiny_opt_config():  # type: ignore
-    return tiny_opt_config_helper()
-
-
-def tiny_opt_tokenizer_helper():
-    transformers = pytest.importorskip('transformers')
-
-    hf_tokenizer = transformers.AutoTokenizer.from_pretrained('facebook/opt-125m')
-    hf_tokenizer.add_special_tokens({'pad_token': '[PAD]'})
-    return hf_tokenizer
-
-
-@pytest.fixture(scope='session')
-def _session_tiny_opt_tokenizer():  # type: ignore
-    return tiny_opt_tokenizer_helper()
 
 
 def tiny_t5_config_helper():
@@ -415,11 +368,6 @@ def tiny_gpt2_tokenizer(_session_tiny_gpt2_tokenizer):
 
 
 @pytest.fixture
-def tiny_llama_tokenizer(_session_tiny_llama_tokenizer):
-    return copy.deepcopy(_session_tiny_llama_tokenizer)
-
-
-@pytest.fixture
 def tiny_gpt2_model(_session_tiny_gpt2_model):
     return copy.deepcopy(_session_tiny_gpt2_model)
 
@@ -440,21 +388,6 @@ def _gpt2_peft_config():
 @pytest.fixture
 def gpt2_peft_config():
     return _gpt2_peft_config()
-
-
-@pytest.fixture
-def tiny_opt_config(_session_tiny_opt_config):
-    return copy.deepcopy(_session_tiny_opt_config)
-
-
-@pytest.fixture
-def tiny_opt_tokenizer(_session_tiny_opt_tokenizer):
-    return copy.deepcopy(_session_tiny_opt_tokenizer)
-
-
-@pytest.fixture
-def tiny_opt_model(_session_tiny_opt_model):
-    return copy.deepcopy(_session_tiny_opt_model)
 
 
 @pytest.fixture
@@ -485,3 +418,29 @@ def tiny_mpt_tokenizer(_session_tiny_mpt_tokenizer):
 @pytest.fixture
 def tiny_mpt_model(_session_tiny_mpt_model):
     return copy.deepcopy(_session_tiny_mpt_model)
+
+
+@pytest.fixture
+def clean_mlflow_runs():
+    """Clean up MLflow runs before and after tests.
+
+    This fixture ensures no MLflow runs persist between tests,
+    which prevents "Run already active" errors.
+    """
+    try:
+        import mlflow
+        try:
+            while mlflow.active_run():
+                mlflow.end_run()
+        except Exception:
+            pass
+
+        yield
+
+        try:
+            while mlflow.active_run():
+                mlflow.end_run()
+        except Exception:
+            pass
+    except ImportError:
+        yield
