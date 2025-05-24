@@ -120,6 +120,19 @@ GPU_AVAILABLE_FLOPS = {
         'amp_bf16': 190e12 / 2,
         'int8': 380e12 / 2,
     },
+    # source: https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/data-sheets/amd-instinct-mi300x-data-sheet.pdf
+    'mi300x': {
+        'fp64': 163.4e12,
+        'fp32': 163.4e12,
+        'tf32': 653.7e12,
+        'fp16': 1307.4e12,
+        'amp_fp16': 1307.4e12,
+        'bf16': 1307.4e12,
+        'amp_bf16': 1307.4e12,
+        'fp8': 2614.9e12,
+        'amp_fp8': 2614.9e12,
+        'int8': 2614.9e12,
+    },
 }
 
 
@@ -148,6 +161,8 @@ def get_gpu_flops_available(state: State):
             device_name = 'v100-pcie'
         elif 't4' in device_name:
             device_name = 't4'
+        elif 'mi300x' in device_name:
+            device_name = 'mi300x'
     elif is_xla_installed():
         if xm.xla_device_hw(xm.xla_device()) == 'NEURON':
             device_name = 'trn1'
