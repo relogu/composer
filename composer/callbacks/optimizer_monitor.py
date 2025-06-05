@@ -271,6 +271,10 @@ class OptimizerMonitor(Callback):
         grad_norm, moment_norm, moment2_norm, update_norm, param_norm = .0, .0, .0, .0, .0,
         min_moment2 = float('inf')
         max_moment2 = float('-inf')
+        min_moment = float('inf')
+        max_moment = float('-inf')
+        min_param = float('inf')
+        max_param = float('-inf')
 
         for metric in optimizer_metrics:
             if metric.startswith('l2_norm/grad'):
@@ -283,6 +287,14 @@ class OptimizerMonitor(Callback):
                 min_moment2 = min(min_moment2, optimizer_metrics[metric])
             if metric.startswith('max/moment2'):
                 max_moment2 = max(max_moment2, optimizer_metrics[metric])
+            if metric.startswith('min/moment'):
+                min_moment = min(min_moment, optimizer_metrics[metric])
+            if metric.startswith('max/moment'):
+                max_moment = max(max_moment, optimizer_metrics[metric])
+            if metric.startswith('min/param'):
+                min_param = min(min_param, optimizer_metrics[metric])
+            if metric.startswith('max/param'):
+                max_param = max(max_param, optimizer_metrics[metric])
             if metric.startswith('l2_norm/update'):
                 update_norm += optimizer_metrics[metric]**2
             if metric.startswith('l2_norm/param'):
@@ -306,6 +318,10 @@ class OptimizerMonitor(Callback):
         optimizer_metrics['l2_norm/param/global'] = param_norm**0.5
         optimizer_metrics['min/moment2/global'] = min_moment2
         optimizer_metrics['max/moment2/global'] = max_moment2
+        optimizer_metrics['min/moment/global'] = min_moment
+        optimizer_metrics['max/moment/global'] = max_moment
+        optimizer_metrics['min/param/global'] = min_param
+        optimizer_metrics['max/param/global'] = max_param
 
         if self.report_curvature:
             curvature_stats = finalize_curvature_metrics(curvature_acc)
