@@ -158,6 +158,8 @@ class ADOPT(Optimizer):
     metric_functions = {
         'l2_norm/moment': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg']),
         'l2_norm/moment2': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg_sq']),
+        'min/param': lambda param, optim_state, step_tensor: torch.min(param.data),
+        'max/param': lambda param, optim_state, step_tensor: torch.max(param.data),
         'min/moment': lambda param, optim_state, step_tensor: torch.min(optim_state['exp_avg']),
         'max/moment': lambda param, optim_state, step_tensor: torch.max(optim_state['exp_avg']),
         'min/moment2': lambda param, optim_state, step_tensor: torch.min(optim_state['exp_avg_sq']),
