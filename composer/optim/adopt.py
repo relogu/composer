@@ -158,6 +158,8 @@ class ADOPT(Optimizer):
     metric_functions = {
         'l2_norm/moment': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg']),
         'l2_norm/moment2': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(optim_state['exp_avg_sq']),
+        'min/moment': lambda param, optim_state, step_tensor: torch.min(optim_state['exp_avg']),
+        'max/moment': lambda param, optim_state, step_tensor: torch.max(optim_state['exp_avg']),
         'min/moment2': lambda param, optim_state, step_tensor: torch.min(optim_state['exp_avg_sq']),
         'max/moment2': lambda param, optim_state, step_tensor: torch.max(optim_state['exp_avg_sq']),
         'l2_norm/param': lambda param, optim_state, step_tensor: torch.linalg.vector_norm(param.data),
@@ -425,6 +427,18 @@ class ADOPT(Optimizer):
                     dist.all_reduce(reduced, reduce_operation='SUM')
 
                 optimizer_metrics[metric] = math.sqrt(reduced)
+            elif metric.startswith('min'):
+                reduced = optimizer_metrics.get(metric, torch.tensor(0.0, device=torch.cuda.current_device()))
+                if dist.get_world_size() > 1:
+                    dist.all_reduce(reduced, reduce_operation='MIN')
+
+                optimizer_metrics[metric] = reduced
+            elif metric.startswith('max'):
+                reduced = optimizer_metrics.get(metric, torch.tensor(0.0, device=torch.cuda.current_device()))
+                if dist.get_world_size() > 1:
+                    dist.all_reduce(reduced, reduce_operation='MAX')
+
+                optimizer_metrics[metric] = reduced
             else:
                 reduced = optimizer_metrics.get(metric, torch.tensor(0.0, device=torch.cuda.current_device()))
                 if dist.get_world_size() > 1:
