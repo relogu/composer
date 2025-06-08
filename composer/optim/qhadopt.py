@@ -427,6 +427,25 @@ class QHADOPT(Optimizer):
 
         return loss
 
+    @torch.no_grad()  # pyright: ignore[reportUntypedFunctionDecorator]
+    def apply_step_without_grad(self):
+        """Apply parameter updates using stored momenta without modifying state."""
+
+        for group in self.param_groups:
+            lr = group['lr']
+            weight_decay = group['weight_decay']
+            initial_lr = group['initial_lr']
+            decouple = group['decouple']
+            v1 = cast(float, group['v1'])
+
+            for p in group['params']:
+                state = self.state[p]
+                if decouple and weight_decay != 0:
+                    decay_factor = (lr / initial_lr) if initial_lr else 1.0
+                    p.mul_(1 - decay_factor * weight_decay)
+
+                p.add_(state['exp_avg'], alpha=-lr * v1)
+
     def dist_reduce_metrics(self, optimizer_metrics):
         local_keys = list(optimizer_metrics.keys())
         all_gathered_keys = dist.all_gather_object(local_keys)
