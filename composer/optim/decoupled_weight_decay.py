@@ -178,6 +178,24 @@ class DecoupledSGDW(SGD):
 
         return loss
 
+    @torch.no_grad()  # pyright: ignore[reportUntypedFunctionDecorator]
+    def apply_step_without_grad(self):
+        """Apply stored momentum to parameters without altering optimizer state."""
+
+        for group in self.param_groups:
+            lr = group['lr']
+            weight_decay = group['weight_decay']
+            initial_lr = group['initial_lr']
+
+            for p in group['params']:
+                buf = self.state[p].get('momentum_buffer')
+                if buf is None:
+                    continue
+                if weight_decay != 0:
+                    decay_factor = (lr / initial_lr) if initial_lr else 1.0
+                    p.mul_(1 - decay_factor * weight_decay)
+                p.add_(buf, alpha=-lr)
+
 
 class DecoupledAdamW(AdamW):
     """Adam optimizer with the weight decay term decoupled from the learning rate.
@@ -385,6 +403,40 @@ class DecoupledAdamW(AdamW):
             )
 
         return loss
+
+    @torch.no_grad()  # pyright: ignore[reportUntypedFunctionDecorator]
+    def apply_step_without_grad(self):
+        """Apply AdamW parameter update without modifying optimizer state."""
+
+        for group in self.param_groups:
+            lr = group['lr']
+            initial_lr = group['initial_lr']
+            weight_decay = group['weight_decay']
+            amsgrad = group['amsgrad']
+            beta1, beta2 = group['betas']
+            eps = group['eps']
+
+            for p in group['params']:
+                state = self.state[p]
+                if 'step' not in state:
+                    continue
+                step = int(state['step'].item())
+                exp_avg = state['exp_avg']
+                exp_avg_sq = state['exp_avg_sq']
+                max_exp_avg_sq = state.get('max_exp_avg_sq')
+
+                if weight_decay != 0:
+                    decay_factor = (lr / initial_lr) if initial_lr else 1.0
+                    p.mul_(1 - decay_factor * weight_decay)
+
+                bias_correction1 = 1 - beta1 ** step
+                bias_correction2 = 1 - beta2 ** step
+                if amsgrad and max_exp_avg_sq is not None:
+                    denom = (max_exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+                else:
+                    denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+                step_size = lr / bias_correction1
+                p.addcdiv_(exp_avg, denom, value=-step_size)
 
     def dist_reduce_metrics(self, optimizer_metrics):
         local_keys = list(optimizer_metrics.keys())
