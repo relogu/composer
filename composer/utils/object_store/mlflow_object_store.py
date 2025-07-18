@@ -328,7 +328,7 @@ class MLFlowObjectStore(ObjectStore):
                     f'for provided experiment {experiment_id=}',
                 )
 
-        if experiment_id is None or run_id is None:
+        if experiment_id is None or run_id is None:  # type: ignore[reportUnnecessaryComparison]
             raise ValueError('MLFlowObjectStore failed to initialize experiment and run ID.')
 
         return experiment_id, run_id

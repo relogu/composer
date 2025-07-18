@@ -42,7 +42,7 @@ jobs:
     name: ${{ matrix.IMAGE_NAME }}
     with:
       build-args: |
-        AWS_OFI_NCCL_VERSION=${{ matrix.AWS_OFI_NCCL_VERSION }}
+        EFA_INSTALLER_VERSION=${{ matrix.EFA_INSTALLER_VERSION }}
         BASE_IMAGE=${{ matrix.BASE_IMAGE }}
         CUDA_VERSION=${{ matrix.CUDA_VERSION }}
         MOFED_VERSION=${{ matrix.MOFED_VERSION }}
@@ -53,6 +53,7 @@ jobs:
         PYTORCH_NIGHTLY_URL=${{ matrix.PYTORCH_NIGHTLY_URL }}
         PYTORCH_NIGHTLY_VERSION=${{ matrix.PYTORCH_NIGHTLY_VERSION }}
         NVIDIA_REQUIRE_CUDA_OVERRIDE=${{ matrix.NVIDIA_REQUIRE_CUDA_OVERRIDE }}
+        UBUNTU_VERSION=${{ matrix.UBUNTU_VERSION }}
       context: ./docker
       image-name: ${{ matrix.IMAGE_NAME }}
       image-uuid: ${{ matrix.UUID }}

@@ -122,7 +122,7 @@ class HuggingFaceModel(ComposerModel):
 
         super().__init__()
         self.model = model
-        self.config: PretrainedConfig = model.config
+        self.config: PretrainedConfig = model.config  # type: ignore[reportGeneralTypeIssues]
         self.model_forward_args = self._get_model_forward_args()
         self.tokenizer = tokenizer
         self.should_save_peft_only = should_save_peft_only
@@ -168,7 +168,7 @@ class HuggingFaceModel(ComposerModel):
                     f' This would cause an error during training.'
                     f' Resizing the model embeddings to {len(self.tokenizer)} from {self.config.vocab_size}.',
                 )
-                self.model.resize_token_embeddings(len(self.tokenizer))
+                self.model.resize_token_embeddings(len(self.tokenizer))  # type: ignore[reportGeneralTypeIssues]
             else:
                 raise ValueError(
                     f'The number of tokens in the tokenizer is greater than the number of tokens in the model.'
@@ -288,6 +288,9 @@ class HuggingFaceModel(ComposerModel):
                     s.load_from_serialized_proto(saved_content['content'])  # pyright: ignore[reportGeneralTypeIssues]
                     with open(tokenizer_file_path, 'wb') as _f:
                         _f.write(s.serialized_model_proto())
+                elif saved_content['file_extension'] == '.jinja':
+                    with open(tokenizer_file_path, 'w', encoding='utf-8') as _f:
+                        _f.write(saved_content['content'])
 
             hf_tokenizer = transformers.AutoTokenizer.from_pretrained(
                 tokenizer_save_dir,
@@ -383,18 +386,21 @@ class HuggingFaceModel(ComposerModel):
     @staticmethod
     def hf_from_composer_checkpoint(
         checkpoint_path: str,
-        model_instantiation_class: Optional[Union[type[transformers.PreTrainedModel],
-                                                  type['_BaseAutoModelClass'],
-                                                  str,
-                                                 ]] = None,
+        model_instantiation_class: Optional[Union[
+            type[transformers.PreTrainedModel],
+            type['_BaseAutoModelClass'],
+            str,
+        ]] = None,
         model_config_kwargs: Optional[dict] = None,
         local_checkpoint_save_location: Optional[Union[Path, str]] = None,
         trust_remote_code: bool = False,
-    ) -> tuple[transformers.PreTrainedModel,
-               Optional[Union[transformers.PreTrainedTokenizer,
-                              transformers.PreTrainedTokenizerFast,
-                             ]],
-              ]:
+    ) -> tuple[
+        transformers.PreTrainedModel,
+        Optional[Union[
+            transformers.PreTrainedTokenizer,
+            transformers.PreTrainedTokenizerFast,
+        ]],
+    ]:
         """Loads a HuggingFace model (and tokenizer if present) from a composer checkpoint.
 
         .. note:: This function does not load the weights from the checkpoint. It just loads the correctly configured
@@ -542,7 +548,9 @@ class HuggingFaceModel(ComposerModel):
             # so we add decoder_input_ids to the batch if it is missing
             if self.config.is_encoder_decoder and 'decoder_input_ids' not in batch:
                 if hasattr(self.model, 'prepare_decoder_input_ids_from_labels'):
-                    batch['decoder_input_ids'] = self.model.prepare_decoder_input_ids_from_labels(labels=self.labels)
+                    batch['decoder_input_ids'] = self.model.prepare_decoder_input_ids_from_labels(
+                        labels=self.labels,
+                    )  # type: ignore[reportGeneralTypeIssues]
                 else:
                     raise RuntimeError(
                         'Encoder decoder models require that either decoder_input_ids is present in the batch'
@@ -658,6 +666,9 @@ class HuggingFaceModel(ComposerModel):
                             model_file=str(tokenizer_file_path),  # pyright: ignore[reportGeneralTypeIssues]
                         )
                         tokenizer_file_content = s.serialized_model_proto()
+                    elif tokenizer_file_extension == '.jinja':
+                        with open(tokenizer_file_path, encoding='utf-8') as _tokenizer_file:
+                            tokenizer_file_content = _tokenizer_file.read()
                     else:
                         raise ValueError(
                             f'Unexpected file ending {tokenizer_file_name} in output of tokenizer.save_pretrained.',
@@ -691,9 +702,17 @@ class HuggingFaceModel(ComposerModel):
             # for more info.
             # Note: We use recurse=False here so that we only summon full params for the LM head, not the entire model.
             with FSDP.summon_full_params(self.model, writeback=False, recurse=False):
-                return self.model.generate(input_ids=input_ids, pad_token_id=pad_token_id, **kwargs)
+                return self.model.generate(
+                    input_ids=input_ids,
+                    pad_token_id=pad_token_id,
+                    **kwargs,
+                )  # type: ignore[reportGeneralTypeIssues]
         else:
-            return self.model.generate(input_ids=input_ids, pad_token_id=pad_token_id, **kwargs)
+            return self.model.generate(
+                input_ids=input_ids,
+                pad_token_id=pad_token_id,
+                **kwargs,
+            )  # type: ignore[reportGeneralTypeIssues]
 
 
 def _maybe_get_peft_model(
@@ -734,7 +753,7 @@ def maybe_get_underlying_model(
         Union[transformers.PreTrainedModel]: The underlying transformers model
     """
     if peft_installed and isinstance(model, PeftModel):
-        return model.base_model.model
+        return model.base_model.model  # type: ignore[reportGeneralTypeIssues]
     else:
         return model
 

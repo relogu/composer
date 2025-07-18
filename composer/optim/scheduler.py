@@ -180,7 +180,7 @@ def compile_composer_scheduler(scheduler: ComposerScheduler, state: State, ssr: 
     optimizers = state.optimizers
     if len(optimizers) != 1:
         raise NotImplementedError('Providing functional schedulers is unsupported with multiple optimizers.')
-        
+
     # TODO<Alex>: Potentially extend to support multiple optimizers
     # optimizer = weakref.proxy(optimizers[0])
     optimizer = optimizers[0]
@@ -204,7 +204,7 @@ def compile_composer_scheduler(scheduler: ComposerScheduler, state: State, ssr: 
                     ),
                 )
         return scheduler(state, ssr)
-        
+
     # TODO<Alex>: Potentially extend to support different schedulers per param group
     lambda_scheduler = LambdaLR(optimizer, scheduler_fn)
 

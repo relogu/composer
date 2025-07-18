@@ -189,7 +189,9 @@ class ADOPT(Optimizer):
         if not 0.0 <= lr:
             raise ValueError(f'Invalid learning rate: {lr}')
         if isinstance(lr, Tensor) and foreach and not capturable:
-            raise ValueError('lr as a Tensor is not supported for capturable=False and foreach=True',)
+            raise ValueError(
+                'lr as a Tensor is not supported for capturable=False and foreach=True',
+            )
         if not 0.0 <= eps:
             raise ValueError(f'Invalid epsilon value: {eps}')
         if not 0.0 <= betas[0] < 1.0:
@@ -337,11 +339,15 @@ class ADOPT(Optimizer):
             # NOTE: We don't have anything related to AMSGrad here
 
             if group['differentiable'] and state['step'].requires_grad:
-                raise RuntimeError('`requires_grad` is not supported for `step` in differentiable mode',)
+                raise RuntimeError(
+                    '`requires_grad` is not supported for `step` in differentiable mode',
+                )
 
             # Foreach without capturable does not support a tensor lr
             if (group['foreach'] and isinstance(group['lr'], Tensor) and not group['capturable']):
-                raise RuntimeError('lr as a Tensor is not supported for capturable=False and foreach=True',)
+                raise RuntimeError(
+                    'lr as a Tensor is not supported for capturable=False and foreach=True',
+                )
 
             state_steps.append(state['step'])
         return has_complex
@@ -721,11 +727,15 @@ def _multi_tensor_adopt(
         return
 
     if isinstance(lr, Tensor) and not capturable:
-        raise RuntimeError('lr as a Tensor is not supported for capturable=False and foreach=True',)
+        raise RuntimeError(
+            'lr as a Tensor is not supported for capturable=False and foreach=True',
+        )
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:  # type: ignore[reportGeneralTypeIssues]
-        capturable_supported_devices = _get_capturable_supported_devices(supports_xla=False,)
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False,
+        )
         assert all(
             p.device.type == step.device.type and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)

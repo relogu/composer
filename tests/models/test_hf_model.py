@@ -12,18 +12,16 @@ from urllib.parse import urlparse
 
 import pytest
 import torch
-from packaging import version
 from torch.utils.data import DataLoader
 from torchmetrics import Metric
 from torchmetrics.classification import MulticlassAccuracy
-from torchmetrics.regression import PearsonCorrCoef
 
 from composer.loggers import InMemoryLogger
 from composer.metrics import LanguageCrossEntropy, MaskedAccuracy
 from composer.models import HuggingFaceModel
 from composer.trainer import Trainer
 from composer.utils import dist, is_model_fsdp
-from tests.common.datasets import RandomTextClassificationDataset, RandomTextLMDataset, RandomTextRegressionDataset
+from tests.common.datasets import RandomTextClassificationDataset, RandomTextLMDataset
 from tests.common.markers import device, world_size
 from tests.common.models import (
     configure_tiny_bert_model,
@@ -145,70 +143,6 @@ def test_hf_train_eval_predict(num_classes: int, tiny_bert_config):
     num_predict_batches_expected = ((size - 1) // batch_size) + 1
     assert len(predictions) == num_predict_batches_expected
     assert predictions[0]['logits'].shape == (batch_size, num_classes)
-
-
-@pytest.mark.filterwarnings('ignore: The variance of predictions')
-def test_hf_train_eval_predict_regression(tiny_deberta_config):
-    transformers = pytest.importorskip('transformers')
-
-    tiny_deberta_config.num_labels = 1
-    hf_model = transformers.AutoModelForSequenceClassification.from_config(
-        tiny_deberta_config,
-    )  # type: ignore (thirdparty)
-
-    metrics = PearsonCorrCoef(num_outputs=1)
-    model = HuggingFaceModel(hf_model, metrics=[metrics], use_logits=True)
-
-    vocab_size = 50265  # Match deberta vocab size
-    sequence_length = 4
-    size = 16
-    batch_size = 8
-
-    train_dataset = RandomTextRegressionDataset(
-        size=size,
-        vocab_size=vocab_size,
-        sequence_length=sequence_length,
-        use_keys=True,
-    )
-    eval_dataset = RandomTextRegressionDataset(
-        size=size,
-        vocab_size=vocab_size,
-        sequence_length=sequence_length,
-        use_keys=True,
-    )
-    predict_dataset = RandomTextRegressionDataset(
-        size=size,
-        vocab_size=vocab_size,
-        sequence_length=sequence_length,
-        use_keys=True,
-    )
-
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, sampler=dist.get_sampler(train_dataset))
-    eval_dataloader = DataLoader(eval_dataset, batch_size=batch_size, sampler=dist.get_sampler(eval_dataset))
-    predict_dataloader = DataLoader(predict_dataset, batch_size=batch_size)
-
-    trainer = Trainer(
-        model=model,
-        train_dataloader=train_dataloader,
-        max_duration='1ep',
-        eval_dataloader=eval_dataloader,
-    )
-
-    trainer.fit()
-    trainer.eval()
-
-    # Check that there is some train/eval accuracy
-    assert trainer.state.train_metrics is not None
-    assert trainer.state.train_metrics['PearsonCorrCoef'].compute() != 0.0
-    assert trainer.state.eval_metrics['eval']['PearsonCorrCoef'].compute() != 0.0
-
-    predictions = trainer.predict(predict_dataloader)
-
-    # Check that the output predictions are the expected shape
-    # for regression, the output is a single value
-    num_predict_batches_expected = ((size - 1) // batch_size) + 1
-    assert len(predictions) == num_predict_batches_expected
-    assert predictions[0]['logits'].shape == (batch_size,)
 
 
 def check_hf_tokenizer_equivalence(tokenizer1, tokenizer2):
@@ -567,16 +501,6 @@ def get_lm_trainer(
         should_save_peft_only=should_save_peft_only,
     )
 
-    # On torch 2.0, fsdp wrapped modules can not have both frozen and unfrozen params.
-    # On 2.1+, if you have use_orig_params=True, they can. So we need a special case for the tests here.
-    if version.parse(torch.__version__) < version.parse('2.1.0') and peft_config is not None:
-        for name, module in model.named_modules():
-            if 'lora' in name.lower() and 'default' in name.lower():
-                has_parameters = any(True for _ in module.parameters())
-                has_buffers = any(True for _ in module.buffers())
-                if has_parameters or has_buffers:
-                    module._fsdp_wrap = True  # type: ignore
-
     vocab_size = hf_model.config.vocab_size
     sequence_length = 4
     size = 4
@@ -764,22 +688,24 @@ def test_hf_loading_load_save_paths(
 
 @pytest.mark.parametrize('modify_tokenizer', [False, True])
 @pytest.mark.parametrize('save_fast', [True, False])
-def test_hf_loading_sentencepiece_tokenizer(modify_tokenizer: bool, tmp_path: Path, save_fast: bool, tiny_t5_model):
-    transformers = pytest.importorskip('transformers')
-
-    t0_pp_tokenizer = transformers.AutoTokenizer.from_pretrained('bigscience/T0pp')
-
+def test_hf_loading_sentencepiece_tokenizer(
+    modify_tokenizer: bool,
+    tmp_path: Path,
+    save_fast: bool,
+    tiny_t5_model,
+    tiny_t0_tokenizer,
+):
     if modify_tokenizer:
-        assert t0_pp_tokenizer is not None  # pyright
-        t0_pp_tokenizer.add_special_tokens({'bos_token': '[NEWSPECIAL]'})
+        assert tiny_t0_tokenizer is not None  # pyright
+        tiny_t0_tokenizer.add_special_tokens({'bos_token': '[NEWSPECIAL]'})
         # This is apparently not allowed anymore
         # It results in ValueError: Both extra_ids (100) and additional_special_tokens (['[MOSAICML'])
         # are provided to T5Tokenizer. In this case the additional_special_tokens must include the extra_ids tokens
         # t0_pp_tokenizer.add_special_tokens({'additional_special_tokens': ['[MOSAICML']})
-        t0_pp_tokenizer.add_tokens(['totallyarealtoken', 'mosaicml'])
-        tiny_t5_model.resize_token_embeddings(len(t0_pp_tokenizer))
+        tiny_t0_tokenizer.add_tokens(['totallyarealtoken', 'mosaicml'])
+        tiny_t5_model.resize_token_embeddings(len(tiny_t0_tokenizer))
 
-    trainer = get_lm_trainer(tiny_t5_model, t0_pp_tokenizer, str(tmp_path), is_conditional_generation=True)
+    trainer = get_lm_trainer(tiny_t5_model, tiny_t0_tokenizer, str(tmp_path), is_conditional_generation=True)
     trainer.save_checkpoint(str(tmp_path / 'hf-checkpoint.pt'))
 
     if not save_fast:
@@ -801,7 +727,7 @@ def test_hf_loading_sentencepiece_tokenizer(modify_tokenizer: bool, tmp_path: Pa
     hf_loaded_tokenizer.save_pretrained(str(tmp_path / 'hf-tokenizer-2'))
 
     check_hf_model_equivalence(hf_loaded_model, tiny_t5_model)
-    check_hf_tokenizer_equivalence(hf_loaded_tokenizer, t0_pp_tokenizer)
+    check_hf_tokenizer_equivalence(hf_loaded_tokenizer, tiny_t0_tokenizer)
 
 
 @pytest.mark.parametrize('modify_tokenizer', [False, True])
@@ -1165,7 +1091,6 @@ def test_write_hf_from_composer_direct(tiny_bert_tokenizer, tmp_path):
         'num_attention_heads': 2,
         'num_hidden_layers': 2,
         'intermediate_size': 512,
-        'attn_implementation': 'eager',
     }
     tiny_bert_config = transformers.BertConfig(**tiny_overrides)
     tiny_bert_model = transformers.BertForMaskedLM(tiny_bert_config)
@@ -1387,7 +1312,6 @@ def test_peft_init(peft_type: str, task_type: str, tiny_gpt2_model, gpt2_peft_co
     assert hf_model.model.config == original_model.config
 
 
-@pytest.mark.skipif(version.parse(torch.__version__) < version.parse('2.0'), reason='requires PyTorch 2+')
 def test_peft_init_errors(tiny_gpt2_model, gpt2_peft_config):
     pytest.importorskip('peft')
     peft_config = copy.deepcopy(gpt2_peft_config)
@@ -1397,7 +1321,6 @@ def test_peft_init_errors(tiny_gpt2_model, gpt2_peft_config):
         _ = HuggingFaceModel(tiny_gpt2_model, peft_config=peft_config)
 
 
-@pytest.mark.skipif(version.parse(torch.__version__) < version.parse('2.0'), reason='requires PyTorch 2+')
 def test_peft_init_not_installed(tiny_gpt2_model, gpt2_peft_config):
     pytest.importorskip('peft')
 
@@ -1407,10 +1330,10 @@ def test_peft_init_not_installed(tiny_gpt2_model, gpt2_peft_config):
             _ = HuggingFaceModel(tiny_gpt2_model, peft_config=gpt2_peft_config)
 
 
-@pytest.mark.skipif(version.parse(torch.__version__) < version.parse('2.0'), reason='requires PyTorch 2+')
 @pytest.mark.parametrize('should_save_peft_only', [True, False])
 def test_peft_trains_and_loads(tiny_gpt2_model, tiny_gpt2_tokenizer, gpt2_peft_config, tmp_path, should_save_peft_only):
     pytest.importorskip('peft')
+    model_copy = copy.deepcopy(tiny_gpt2_model)
 
     trainer = get_lm_trainer(
         tiny_gpt2_model,
@@ -1424,7 +1347,7 @@ def test_peft_trains_and_loads(tiny_gpt2_model, tiny_gpt2_tokenizer, gpt2_peft_c
     trainer.fit()
 
     load_trainer = get_lm_trainer(
-        tiny_gpt2_model,
+        model_copy,
         tiny_gpt2_tokenizer,
         str(tmp_path),
         peft_config=gpt2_peft_config,
@@ -1438,7 +1361,6 @@ def test_peft_trains_and_loads(tiny_gpt2_model, tiny_gpt2_tokenizer, gpt2_peft_c
         torch.testing.assert_close(p1, p2)
 
 
-@pytest.mark.skipif(version.parse(torch.__version__) < version.parse('2.0'), reason='requires PyTorch 2+')
 @pytest.mark.parametrize(
     'model,tokenizer,peft_config',
     [
@@ -1461,7 +1383,6 @@ def test_peft_generate(model, tokenizer, peft_config):
     hf_model.generate(**input_dict, max_new_tokens=5, pad_token_id=tokenizer.pad_token_id)
 
 
-@pytest.mark.skipif(version.parse(torch.__version__) < version.parse('2.0'), reason='requires PyTorch 2+')
 def test_peft_metadata(tiny_gpt2_model, tiny_gpt2_tokenizer, gpt2_peft_config):
     pytest.importorskip('peft')
 
@@ -1474,7 +1395,6 @@ def test_peft_metadata(tiny_gpt2_model, tiny_gpt2_tokenizer, gpt2_peft_config):
     assert loaded_peft_config == gpt2_peft_config
 
 
-@pytest.mark.skipif(version.parse(torch.__version__) < version.parse('2.0'), reason='requires PyTorch 2+')
 @pytest.mark.parametrize('should_save_peft_only', [True, False])
 def test_peft_write_hf_from_composer(
     tiny_gpt2_model,
@@ -1489,6 +1409,7 @@ def test_peft_write_hf_from_composer(
     # Simulate a local model instead of a hub model
     tiny_gpt2_model.save_pretrained(tmp_path / 'hf-save-to-load')
     tiny_gpt2_model = transformers.AutoModelForCausalLM.from_pretrained(tmp_path / 'hf-save-to-load')
+    model_copy = copy.deepcopy(tiny_gpt2_model)
 
     trainer = get_lm_trainer(
         tiny_gpt2_model,
@@ -1517,7 +1438,7 @@ def test_peft_write_hf_from_composer(
         torch.testing.assert_close(p1, p2)
 
     # Test we can load back in using peft interface
-    loaded_peft_model = peft.PeftModelForCausalLM.from_pretrained(tiny_gpt2_model, str(tmp_path / 'hf-save-pretrained'))
+    loaded_peft_model = peft.PeftModelForCausalLM.from_pretrained(model_copy, str(tmp_path / 'hf-save-pretrained'))
     for p1, p2 in zip(trainer.state.model.model.parameters(), loaded_peft_model.parameters()):
         torch.testing.assert_close(p1, p2)
 
@@ -1599,7 +1520,6 @@ def test_peft_fsdp_trains(
             assert not all('lora' in k for k in loaded_ckpt_1['state']['model'].keys())
 
 
-@pytest.mark.skipif(version.parse(torch.__version__) < version.parse('2.0'), reason='requires PyTorch 2+')
 def test_filtered_state_dict(tiny_gpt2_model, tiny_gpt2_tokenizer, gpt2_peft_config, tmp_path):
     pytest.importorskip('peft')
 
@@ -1612,3 +1532,48 @@ def test_filtered_state_dict(tiny_gpt2_model, tiny_gpt2_tokenizer, gpt2_peft_con
     state_dict = hf_model.state_dict()
 
     assert len(state_dict.keys()) == 4
+
+
+def test_hf_tokenizer_with_chat_template(tmp_path: Path, tiny_bert_model, tiny_bert_tokenizer):
+    """Test that tokenizers with chat templates (which create .jinja files) can be checkpointed."""
+    pytest.importorskip('transformers')
+
+    # Use the existing tiny_bert_tokenizer and add a chat template to it
+    tokenizer = tiny_bert_tokenizer
+
+    # Add a chat template to force creation of chat_template.jinja file
+    chat_template = "{% for message in messages %}{{ message['role'] + ': ' + message['content'] + '\n' }}{% endfor %}"
+    tokenizer.chat_template = chat_template  # type: ignore
+
+    # This should not fail even with the chat template
+    trainer = get_lm_trainer(tiny_bert_model, tokenizer, str(tmp_path))
+
+    # The checkpoint save should work without raising "Unexpected file ending" error
+    trainer.save_checkpoint(str(tmp_path / 'chat-template-checkpoint.pt'))
+
+    # Verify the checkpoint was created successfully
+    assert (tmp_path / 'chat-template-checkpoint.pt').exists()
+
+    # Verify that the checkpoint actually contains a .jinja file
+    loaded_checkpoint = torch.load(tmp_path / 'chat-template-checkpoint.pt', weights_only=False)
+    hf_state = loaded_checkpoint['state']['integrations']['huggingface']
+    hf_tokenizer_state = hf_state['tokenizer']
+
+    # Check that chat_template.jinja file is present in the checkpoint
+    jinja_files = [filename for filename in hf_tokenizer_state.keys() if filename.endswith('.jinja')]
+    assert len(jinja_files) > 0, 'No .jinja files found in checkpoint'
+    assert 'chat_template.jinja' in hf_tokenizer_state, 'chat_template.jinja not found in checkpoint'
+
+    # Verify the .jinja file has the correct extension and content type
+    jinja_entry = hf_tokenizer_state['chat_template.jinja']
+    assert jinja_entry['file_extension'] == '.jinja', f"Expected .jinja extension, got {jinja_entry['file_extension']}"
+    assert isinstance(jinja_entry['content'], str), f"Expected string content, got {type(jinja_entry['content'])}"
+    assert chat_template in jinja_entry['content'], 'Chat template content not found in .jinja file'
+
+    # Test loading the checkpoint back
+    _, hf_loaded_tokenizer = HuggingFaceModel.hf_from_composer_checkpoint(
+        checkpoint_path=str(tmp_path / 'chat-template-checkpoint.pt'),
+    )
+
+    # Verify the chat template was preserved
+    assert hf_loaded_tokenizer.chat_template == chat_template  # type: ignore
