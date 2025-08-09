@@ -151,7 +151,7 @@ def get_gpu_flops_available(state: State):
             # We just assume SXM because device name does not differentiate, and we would have to check
             # power or bandwidth or something.
             device_name = 'h200-sxm'
-        elif 'h100' in device_name and 'hbm3' in device_name:
+        elif 'h100' in device_name and ('hbm3' in device_name or 'nvl' in device_name):
             device_name = 'h100-sxm'
         elif 'h100' in device_name and ('pcie' in device_name or 'hbm2e' in device_name):
             device_name = 'h100-pcie'
