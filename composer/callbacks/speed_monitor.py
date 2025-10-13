@@ -84,6 +84,7 @@ GPU_AVAILABLE_FLOPS = {
         'tf32': 74.8e12,
         'fp16': 149.7e12,
         'amp_fp16': 149.7e12,
+        'amp_bf16': 149.7e12,
     },
     # source: https://images.nvidia.com/content/technologies/volta/pdf/volta-v100-datasheet-update-us-1165301-r5.pdf
     'v100-sxm': {
